@@ -175,19 +175,28 @@ function Metric({ label, value }: { label: string; value: string }) {
 function TokenInstructions({ name, token }: { name: string; token: string }) {
   const toast = useToast();
   const origin = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : '';
-  const psCommand = `$env:NEXPANEL_URL='${origin}'; $env:NEXPANEL_NODE_TOKEN='${token}'; nexpanel-agent`;
-  const shCommand = `NEXPANEL_URL='${origin}' NEXPANEL_NODE_TOKEN='${token}' nexpanel-agent`;
+  const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const registerCmd = `node apps/cli/dist/index.js node register ${origin} ${token}`;
+  const startCmd = `node apps/cli/dist/index.js start agent`;
+
   return (
     <div className="space-y-4 text-sm">
       <p>
         Node <strong>{name}</strong> created. This registration token is shown <strong>once</strong> — store it safely.
       </p>
       <CopyBlock label="Registration token" value={token} onCopy={() => toast('success', 'Copied')} />
+      {isLocal && (
+        <div className="p-3 bg-bad/10 border border-bad/20 text-bad rounded-lg text-xs leading-relaxed">
+          <strong>⚠️ Warning:</strong> You are currently accessing this panel via <code>localhost</code>. 
+          If you are registering a remote machine, you <strong>must</strong> replace <code>localhost</code> in the command below 
+          with your panel server&apos;s public IP address.
+        </div>
+      )}
       <div>
-        <p className="text-xs text-dim mb-1.5">On the target machine (after installing the agent — see docs/INSTALL.md):</p>
-        <CopyBlock label="Windows (PowerShell)" value={psCommand} onCopy={() => toast('success', 'Copied')} />
+        <p className="text-xs text-dim mb-1.5">Run these commands on the target machine inside the project directory:</p>
+        <CopyBlock label="1. Register the Node" value={registerCmd} onCopy={() => toast('success', 'Copied')} />
         <div className="mt-2">
-          <CopyBlock label="Linux" value={shCommand} onCopy={() => toast('success', 'Copied')} />
+          <CopyBlock label="2. Start the Agent" value={startCmd} onCopy={() => toast('success', 'Copied')} />
         </div>
       </div>
     </div>
