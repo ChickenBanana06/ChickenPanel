@@ -1,0 +1,25 @@
+{
+  "name": "nexpanel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NexPanel — AI-powered cross-platform server management platform",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "dev:api": "pnpm --filter @nexpanel/api dev",
+    "dev:web": "pnpm --filter @nexpanel/web dev",
+    "dev:agent": "pnpm --filter @nexpanel/agent dev",
+    "db:generate": "pnpm --filter @nexpanel/database generate",
+    "db:migrate": "pnpm --filter @nexpanel/database migrate:dev",
+    "db:deploy": "pnpm --filter @nexpanel/database migrate:deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

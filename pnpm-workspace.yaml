@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+  - agent
+  - extensions/*
+
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma
+  - esbuild
+  - embedded-postgres
+  - '@embedded-postgres/windows-x64'
+  - '@embedded-postgres/linux-x64'
+  - sharp
+  - '@tailwindcss/oxide'
