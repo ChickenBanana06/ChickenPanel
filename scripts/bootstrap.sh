@@ -14,14 +14,37 @@ DIR="${CHICKENPANEL_DIR:-$HOME/chickenpanel}"
 echo "== ChickenPanel bootstrap =="
 echo "repo: $REPO  branch: $BRANCH  dir: $DIR"
 
+install_node() {
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "Detected Debian/Ubuntu system. Installing Node.js 20..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y nodejs
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "Detected RHEL/CentOS/Fedora system. Installing Node.js 20..."
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+    dnf install -y nodejs
+  elif command -v yum >/dev/null 2>&1; then
+    echo "Detected RHEL/CentOS system. Installing Node.js 20..."
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+    yum install -y nodejs
+  elif command -v brew >/dev/null 2>&1; then
+    echo "Detected macOS Homebrew. Installing Node.js 20..."
+    brew install node@20
+    brew link node@20
+  else
+    echo "ERROR: Node.js 20+ is required, but we couldn't detect a package manager to install it automatically." >&2
+    echo "Please install Node.js 20+ manually and re-run this script." >&2
+    exit 1
+  fi
+}
+
 if ! command -v node >/dev/null 2>&1; then
-  echo "ERROR: Node.js 20+ is required. Install it and re-run." >&2
-  exit 1
+  install_node
 fi
 NODE_MAJOR=$(node --version | sed 's/v\([0-9]*\).*/\1/')
 if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "ERROR: Node.js 20+ required (found $(node --version))." >&2
-  exit 1
+  echo "Node.js version is less than 20 (found $(node --version)). Upgrading to Node.js 20..."
+  install_node
 fi
 if ! command -v git >/dev/null 2>&1; then
   echo "ERROR: git is required. Install it and re-run." >&2
