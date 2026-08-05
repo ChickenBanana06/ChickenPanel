@@ -56,9 +56,11 @@ if (Test-Path $npmBin) {
 Write-Host ""
 Write-Host "== ChickenPanel ready in $dir ==" -ForegroundColor Green
 Write-Host "Run the full panel here:"
+Write-Host "  cd '$dir'"
 Write-Host "  chickenpanel install    # first time: init database"
-Write-Host "  chickenpanel start      # db + api + web  ->  http://localhost:3000"
+Write-Host "  chickenpanel start      # db + api + web  ->  http://<your-server-ip>:3000"
 Write-Host ""
 Write-Host "Or connect this machine as a NODE to an existing panel:"
+Write-Host "  cd '$dir'"
 Write-Host "  chickenpanel node register http://PANEL_IP:4000 YOUR_TOKEN"
 Write-Host "  chickenpanel start agent"

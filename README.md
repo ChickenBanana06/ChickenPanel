@@ -16,10 +16,22 @@ Simply run the command below on your machine. The script will automatically clon
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ChickenBanana06/ChickenPanel/main/scripts/bootstrap.sh | sh
 ```
+After the installation completes, run the following to navigate to the directory and start the panel:
+```bash
+cd ~/chickenpanel
+node apps/cli/dist/index.js install   # first-time database setup
+node apps/cli/dist/index.js start     # start all services
+```
 
 ### Windows (Run in PowerShell as Administrator)
 ```powershell
 irm https://raw.githubusercontent.com/ChickenBanana06/ChickenPanel/main/scripts/bootstrap.ps1 | iex
+```
+After the installation completes, navigate to the folder and run:
+```powershell
+cd ~\chickenpanel
+chickenpanel install
+chickenpanel start
 ```
 
 ***
