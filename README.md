@@ -30,10 +30,30 @@ irm https://raw.githubusercontent.com/ChickenBanana06/ChickenPanel/main/scripts/
 
 If you prefer a manual setup, or if the one-line bootstrap fails, follow these steps:
 
-#### Requirements
-- **Node.js 20+**
-- **Git**
-- **pnpm 10+** (Install via `npm install -g pnpm@10`)
+#### Requirements & Node.js Installation
+
+##### 1. Node.js 20+
+If Node.js is not yet installed on your system, install it using the appropriate command:
+
+* **Ubuntu / Debian**:
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+  ```
+* **CentOS / RHEL / Rocky Linux**:
+  ```bash
+  curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo -E bash -
+  sudo yum install -y nodejs
+  ```
+* **macOS (Homebrew)**:
+  ```bash
+  brew install node@20 && brew link node@20
+  ```
+* **Windows**: Download the installer directly from the [Node.js Official Website](https://nodejs.org/).
+
+##### 2. Other Requirements
+- **Git** (Required for version control and updates)
+- **pnpm 10+** (Install globally via `npm install -g pnpm@10`)
 - **Java 21+** (Optional; required for Minecraft servers. The panel will auto-download a JRE if missing.)
 
 #### Manual Setup Steps
