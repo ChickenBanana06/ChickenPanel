@@ -49,7 +49,14 @@ const SERVICES: Record<ServiceName, ServiceDef> = {
     name: 'db',
     command: [process.execPath, path.join(repoRoot, 'packages', 'database', 'dist', 'dev-server.js')],
     cwd: repoRoot,
-    env: { NEXPANEL_PGDATA: path.join(dataDir(), 'pgdata') },
+    env: {
+      // Reuse an existing dev data dir (repo/.pgdata) when present so
+      // installs over a dev checkout keep their data; fresh installs use
+      // the per-user data directory.
+      NEXPANEL_PGDATA: fs.existsSync(path.join(repoRoot, '.pgdata'))
+        ? path.join(repoRoot, '.pgdata')
+        : path.join(dataDir(), 'pgdata'),
+    },
   },
   api: {
     name: 'api',

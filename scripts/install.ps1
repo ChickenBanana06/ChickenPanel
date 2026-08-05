@@ -1,6 +1,6 @@
-# NexPanel installer for Windows (PowerShell 5.1+)
+﻿# NexPanel installer for Windows (PowerShell 5.1+)
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-# Safe to run repeatedly — it will not destroy an existing installation.
+# Safe to run repeatedly - it will not destroy an existing installation.
 $ErrorActionPreference = 'Stop'
 
 Write-Host "== NexPanel installer (Windows) ==" -ForegroundColor Cyan
@@ -12,7 +12,7 @@ $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory 
 $disk = [math]::Round((Get-PSDrive -Name C).Free / 1GB, 1)
 Write-Host "OS: Windows $os  Arch: $arch  RAM: ${ram}GB  Free disk: ${disk}GB"
 
-if ($ram -lt 2) { Write-Warning "Less than 2GB RAM — NexPanel may struggle." }
+if ($ram -lt 2) { Write-Warning "Less than 2GB RAM - NexPanel may struggle." }
 if ($disk -lt 5) { Write-Warning "Less than 5GB free disk space." }
 
 # --- Dependencies ----------------------------------------------------------
@@ -34,21 +34,31 @@ if (-not $pnpm) {
 
 $git = Get-Command git -ErrorAction SilentlyContinue
 $java = Get-Command java -ErrorAction SilentlyContinue
-if (-not $java) { Write-Warning "Java not found — required for Minecraft servers (install Temurin 21)." }
-if (-not $git)  { Write-Warning "Git not found — required for git-based deployments." }
+if (-not $java) { Write-Warning "Java not found - required for Minecraft servers (install Temurin 21)." }
+if (-not $git)  { Write-Warning "Git not found - required for git-based deployments." }
 
 # --- Install ---------------------------------------------------------------
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 Write-Host "Installing dependencies..."
 pnpm install
+if ($LASTEXITCODE -ne 0) { Write-Error "pnpm install failed." }
 Write-Host "Building..."
 pnpm -r --workspace-concurrency=1 build
+if ($LASTEXITCODE -ne 0) { Write-Error "Build failed." }
 Write-Host "Initializing database..."
 node apps\cli\dist\index.js install
+if ($LASTEXITCODE -ne 0) { Write-Error "Database initialization failed." }
+
+# --- Global command shim ---------------------------------------------------
+$npmBin = Join-Path $env:APPDATA 'npm'
+if (Test-Path $npmBin) {
+    $shim = Join-Path $npmBin 'nexpanel.cmd'
+    "@echo off`r`nnode `"$repoRoot\apps\cli\dist\index.js`" %*" | Out-File -FilePath $shim -Encoding ascii
+    Write-Host "Global command installed: nexpanel"
+}
 
 Write-Host ""
 Write-Host "== Installation complete ==" -ForegroundColor Green
-Write-Host "Start the panel:   node apps\cli\dist\index.js start"
+Write-Host "Start the panel:   nexpanel start"
 Write-Host "Then open:         http://localhost:3000"
-Write-Host "Tip: add an alias: Set-Alias nexpanel '$repoRoot\apps\cli\dist\index.js'"
