@@ -108,6 +108,8 @@ export const MessagePartSchema = z.discriminatedUnion('type', [
     status: z.enum(['pending', 'awaiting_approval', 'running', 'succeeded', 'failed', 'denied']),
     result: z.unknown().optional(),
     error: z.string().optional(),
+    /** Opaque provider data to round-trip across turns (e.g. Gemini thought_signature). */
+    providerMeta: z.unknown().optional(),
   }),
   z.object({ type: z.literal('ui'), component: UIComponentSchema, response: z.unknown().optional() }),
   z.object({ type: z.literal('plan'), plan: PlanSchema }),
@@ -133,13 +135,19 @@ export interface ChatToolDef {
 export type ChatMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: { id: string; name: string; args: unknown }[] }
+  | {
+      role: 'assistant';
+      content: string;
+      /** providerMeta carries opaque per-provider data that must round-trip
+       *  across turns (e.g. Gemini's required thought_signature). */
+      toolCalls?: { id: string; name: string; args: unknown; providerMeta?: unknown }[];
+    }
   | { role: 'tool'; toolCallId: string; content: string };
 
 export type ProviderStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'thinking'; delta: string }
-  | { type: 'tool_call'; id: string; name: string; args: unknown }
+  | { type: 'tool_call'; id: string; name: string; args: unknown; providerMeta?: unknown }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'done'; stopReason: 'end' | 'tool_calls' | 'max_tokens' | 'error'; error?: string };
 

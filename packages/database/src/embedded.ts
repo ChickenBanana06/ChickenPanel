@@ -51,6 +51,10 @@ export async function startEmbeddedPostgres(opts: EmbeddedDbOptions): Promise<Ru
     password,
     port,
     persistent: true,
+    // Initialise the cluster as UTF-8 with the C locale. Without this, initdb
+    // inherits the Windows system locale (e.g. WIN1252), which cannot store
+    // emoji or non-Latin text and breaks message/MOTD persistence.
+    initdbFlags: ['--encoding=UTF8', '--locale=C'],
   });
 
   const initialized = await pgDataExists(opts.dataDir);
@@ -58,10 +62,19 @@ export async function startEmbeddedPostgres(opts: EmbeddedDbOptions): Promise<Ru
     await pg.initialise();
   }
   await pg.start();
+  // Create the application database explicitly as UTF-8 from template0, so it
+  // is UTF-8 even on clusters that were initialised with a legacy encoding.
+  const client = pg.getPgClient();
+  await client.connect();
   try {
-    await pg.createDatabase(database);
-  } catch {
-    // database already exists — fine
+    const existing = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [database]);
+    if (existing.rowCount === 0) {
+      await client.query(
+        `CREATE DATABASE "${database}" WITH ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0`,
+      );
+    }
+  } finally {
+    await client.end();
   }
 
   return {

@@ -291,9 +291,15 @@ export class AIService {
     this.activeRuns.set(conversationId, run);
     void this.runLoop(conversationId, run)
       .catch(async (err) => {
+        const message = err instanceof Error ? err.message : String(err);
         console.error(`[ai] run loop error for ${conversationId}:`, err);
+        // Persist a visible error message so the user always sees what went
+        // wrong. Use a plain-ASCII marker so this save can't itself fail.
+        await this.persistAssistantMessage(conversationId, [
+          { type: 'text', text: `[error] The assistant run failed: ${sanitizeForStorage(message)}` },
+        ]).catch((persistErr) => console.error('[ai] failed to persist run error message:', persistErr));
         await this.setState(conversationId, 'errored');
-        this.publish(conversationId, 'run.error', { error: err instanceof Error ? err.message : String(err) });
+        this.publish(conversationId, 'run.error', { error: message });
       })
       .finally(() => {
         this.activeRuns.delete(conversationId);
@@ -340,7 +346,7 @@ export class AIService {
       const parts: MessagePart[] = [];
       let text = '';
       let thinking = '';
-      const toolCalls: { id: string; name: string; args: unknown }[] = [];
+      const toolCalls: { id: string; name: string; args: unknown; providerMeta?: unknown }[] = [];
       let usage: { inputTokens: number; outputTokens: number } | null = null;
       let streamError: string | null = null;
 
@@ -363,7 +369,7 @@ export class AIService {
           } else if (evt.type === 'thinking') {
             thinking += evt.delta;
           } else if (evt.type === 'tool_call') {
-            toolCalls.push(evt);
+            toolCalls.push({ id: evt.id, name: evt.name, args: evt.args, providerMeta: evt.providerMeta });
           } else if (evt.type === 'usage') {
             usage = { inputTokens: evt.inputTokens, outputTokens: evt.outputTokens };
           } else if (evt.type === 'done' && evt.stopReason === 'error') {
@@ -380,7 +386,7 @@ export class AIService {
 
       if (streamError) {
         // Surface provider errors to the user instead of hiding them.
-        const errText = `⚠️ Provider error: ${streamError}`;
+        const errText = `[provider error] ${sanitizeForStorage(streamError)}`;
         await this.persistAssistantMessage(conversationId, [{ type: 'text', text: errText }], usage);
         this.publish(conversationId, 'stream.text', { delta: errText });
         await this.setState(conversationId, 'errored');
@@ -391,7 +397,14 @@ export class AIService {
       if (thinking) parts.push({ type: 'thinking', text: thinking });
       if (text) parts.push({ type: 'text', text });
       for (const tc of toolCalls) {
-        parts.push({ type: 'tool_call', toolCallId: tc.id, name: tc.name, args: tc.args, status: 'pending' });
+        parts.push({
+          type: 'tool_call',
+          toolCallId: tc.id,
+          name: tc.name,
+          args: tc.args,
+          status: 'pending',
+          ...(tc.providerMeta !== undefined ? { providerMeta: tc.providerMeta } : {}),
+        });
       }
       const assistantMsg = await this.persistAssistantMessage(conversationId, parts, usage);
       this.publish(conversationId, 'message.assistant', { messageId: assistantMsg.id });
@@ -498,7 +511,12 @@ export class AIService {
       let success = true;
       let errorMsg: string | undefined;
       try {
-        const parsed = tool.argsSchema.safeParse(tc.args ?? {});
+        let parsed = tool.argsSchema.safeParse(tc.args ?? {});
+        if (!parsed.success && tc.args && typeof tc.args === 'object') {
+          // Fallback for providers (e.g. Gemini) that encode object/array
+          // arguments as JSON strings: parse those strings and retry once.
+          parsed = tool.argsSchema.safeParse(coerceJsonStringArgs(tc.args as Record<string, unknown>));
+        }
         if (!parsed.success) {
           throw new ToolExecutionError(
             `Invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
@@ -669,11 +687,15 @@ export class AIService {
           .filter((p) => p.type === 'tool_call')
           .map((p) => {
             const t = p as Extract<MessagePart, { type: 'tool_call' }>;
-            return { id: t.toolCallId, name: t.name, args: t.args };
+            return { id: t.toolCallId, name: t.name, args: t.args, providerMeta: t.providerMeta };
           });
         for (const p of parts) {
-          if (p.type === 'ui') toolCalls.push({ id: p.component.id, name: 'ask_user', args: { prompt: p.component.prompt } });
-          if (p.type === 'plan') toolCalls.push({ id: p.plan.id, name: 'propose_plan', args: { title: p.plan.title } });
+          if (p.type === 'ui') {
+            toolCalls.push({ id: p.component.id, name: 'ask_user', args: { prompt: p.component.prompt }, providerMeta: undefined });
+          }
+          if (p.type === 'plan') {
+            toolCalls.push({ id: p.plan.id, name: 'propose_plan', args: { title: p.plan.title }, providerMeta: undefined });
+          }
         }
         if (text || toolCalls.length > 0) {
           out.push({ role: 'assistant', content: text, ...(toolCalls.length > 0 ? { toolCalls } : {}) });
@@ -693,21 +715,21 @@ export class AIService {
     const defs: ChatToolDef[] = this.tools.listFor(permissions).map((t) => ({
       name: t.name,
       description: t.description + (t.dangerous ? ' (Requires user approval before it runs.)' : ''),
-      parameters: zodToJsonSchema(t.argsSchema, { target: 'openAi' }) as Record<string, unknown>,
+      parameters: toToolSchema(t.argsSchema),
     }));
     defs.push({
       name: 'ask_user',
       description:
         'Ask the user a question with an interactive UI component (buttons, select, slider, text/number input, confirm dialog, or form). ' +
         'Use when a choice materially affects what you will do. The user can always also reply with free text.',
-      parameters: zodToJsonSchema(AskUserArgsSchema, { target: 'openAi' }) as Record<string, unknown>,
+      parameters: toToolSchema(AskUserArgsSchema),
     });
     defs.push({
       name: 'propose_plan',
       description:
         'Present a multi-step execution plan for user approval before performing complex or multi-part work. ' +
         'Wait for the result before acting: it tells you whether the user approved.',
-      parameters: zodToJsonSchema(ProposePlanArgsSchema, { target: 'openAi' }) as Record<string, unknown>,
+      parameters: toToolSchema(ProposePlanArgsSchema),
     });
     return defs;
   }
@@ -825,6 +847,59 @@ export class AIService {
   private publish(conversationId: string, event: string, data: unknown): void {
     this.ctx.realtime.publish(`chat:${conversationId}`, event, data);
   }
+}
+
+/**
+ * Defensive cleanup for text that must be persisted even in edge cases:
+ * strips lone surrogates and caps length. (The database is UTF-8, so this is
+ * belt-and-suspenders for provider error strings.)
+ */
+function sanitizeForStorage(text: string): string {
+  return text.replace(/[\uD800-\uDFFF]/g, '').slice(0, 4000);
+}
+
+/**
+ * Some providers (Gemini's function-calling) encode object/array arguments as
+ * JSON strings. For any top-level string value that cleanly parses to an
+ * object or array, use the parsed value. Non-JSON strings are left untouched,
+ * so this is a safe no-op for other providers.
+ */
+function coerceJsonStringArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    // Gemini emits explicit null for unfilled optional parameters; drop them
+    // so `.optional()` (non-nullable) fields validate.
+    if (v === null) continue;
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object') {
+            out[k] = parsed;
+            continue;
+          }
+        } catch {
+          // not JSON — fall through and keep the string
+        }
+      }
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Convert a zod schema to a tool JSON Schema that every provider accepts.
+ * Uses $refStrategy:'none' so all shared sub-schemas are inlined — Google
+ * Gemini's function-calling rejects `$ref`/definition loops that OpenAI and
+ * Anthropic tolerate.
+ */
+function toToolSchema(schema: Parameters<typeof zodToJsonSchema>[0]): Record<string, unknown> {
+  const json = zodToJsonSchema(schema, { target: 'openAi', $refStrategy: 'none' }) as Record<string, unknown>;
+  delete json.$schema;
+  delete (json as { definitions?: unknown }).definitions;
+  return json;
 }
 
 function truncateForDisplay(value: unknown): unknown {

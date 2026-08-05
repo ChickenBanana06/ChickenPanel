@@ -36,15 +36,17 @@ function assert(cond, msg) {
 const health = await api('GET', '/health');
 assert(health.status === 200 && health.json.ok, 'health endpoint responds');
 
-// Register first admin (or login if already present)
+// Register first admin (or login if already present).
+// Override the admin password with NEXPANEL_ADMIN_PW if it has been changed.
+const ADMIN_PW = process.env.NEXPANEL_ADMIN_PW ?? 'super-secret-password-1';
 const uniq = Date.now().toString(36);
 let reg = await api('POST', '/auth/register', {
   username: 'admin',
   email: 'admin@example.com',
-  password: 'super-secret-password-1',
+  password: ADMIN_PW,
 });
 if (reg.status !== 200) {
-  const login = await api('POST', '/auth/login', { username: 'admin', password: 'super-secret-password-1' });
+  const login = await api('POST', '/auth/login', { username: 'admin', password: ADMIN_PW });
   assert(login.status === 200, `login as existing admin (${JSON.stringify(login.json)})`);
 } else {
   assert(reg.json.user.role === 'ADMIN', 'first user becomes ADMIN');

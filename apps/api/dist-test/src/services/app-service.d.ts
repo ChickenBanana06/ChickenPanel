@@ -25,6 +25,15 @@ export declare class AppService {
         app: Application;
         taskId: string;
     }>;
+    /**
+     * Allocate one additional port for an application. The port is appended to
+     * the app's port list and exposed as PORT_<n> in its environment (applied
+     * on the next restart).
+     */
+    allocateExtraPort(appId: string): Promise<{
+        port: number;
+        envVar: string;
+    }>;
     get(appId: string): Promise<Application>;
     private buildSpec;
     start(appId: string): Promise<void>;
