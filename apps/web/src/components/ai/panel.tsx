@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
+import { useTypewriter } from '@/lib/typewriter';
 import { Button, Input, Select, Spinner, cx, useToast, StatusBadge } from '../ui';
 
 /* ---------------- Types mirrored from the API ---------------- */
@@ -315,9 +316,10 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
   const messages = useMemo(() => data?.messages ?? [], [data]);
   const state = data?.conversation.state ?? conversation.state;
   const [input, setInput] = useState('');
-  const [streamText, setStreamText] = useState('');
   const [busy, setBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typewriter = useTypewriter();
+  const streamText = typewriter.displayed;
   const refetch = useCallback(() => {
     void mutate();
     onStateChange();
@@ -325,16 +327,26 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
 
   useRealtimeTopic(`chat:${convId}`, (evt) => {
     if (evt.event === 'stream.text') {
-      setStreamText((t) => t + (evt.data as { delta: string }).delta);
+      typewriter.push((evt.data as { delta: string }).delta);
+    } else if (['message.assistant', 'run.done', 'run.error'].includes(evt.event)) {
+      // Let the type-out catch up, then clear the preview and swap in the
+      // persisted message so text never pops in early or is cut off.
+      typewriter.finish(() => {
+        typewriter.reset();
+        refetch();
+      });
     } else if (
-      ['message.assistant', 'ui.ask', 'plan.proposed', 'tool.awaiting_approval', 'tool.finished', 'run.done', 'run.error', 'state'].includes(
-        evt.event,
-      )
+      ['ui.ask', 'plan.proposed', 'tool.awaiting_approval', 'tool.finished', 'state'].includes(evt.event)
     ) {
-      if (evt.event === 'message.assistant') setStreamText('');
       refetch();
     }
   });
+
+  // Reset the type-out when switching conversations.
+  useEffect(() => {
+    typewriter.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
