@@ -151,6 +151,26 @@ export class AppService {
     return { app, taskId: task.id };
   }
 
+  /**
+   * Allocate one additional port for an application. The port is appended to
+   * the app's port list and exposed as PORT_<n> in its environment (applied
+   * on the next restart).
+   */
+  async allocateExtraPort(appId: string): Promise<{ port: number; envVar: string }> {
+    const app = await this.get(appId);
+    if (app.ports.length >= 16) throw ApiError.badRequest('Port limit reached (16 per application)');
+    const [port] = await this.ports.allocate(app.nodeId, 1);
+    if (!port) throw ApiError.conflict('No free port available');
+    const envVar = `PORT_${app.ports.length + 1}`;
+    const env = { ...((app.env as Record<string, string>) ?? {}), [envVar]: String(port) };
+    await this.ctx.db.application.update({
+      where: { id: appId },
+      data: { ports: [...app.ports, port], env: env as Prisma.InputJsonValue },
+    });
+    this.ctx.realtime.publish('apps', 'app.updated', { appId });
+    return { port, envVar };
+  }
+
   async get(appId: string): Promise<Application> {
     const app = await this.ctx.db.application.findUnique({ where: { id: appId } });
     if (!app) throw ApiError.notFound('Application not found');

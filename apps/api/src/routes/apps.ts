@@ -127,6 +127,16 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     });
   }
 
+  app.post('/:id/ports/allocate', { preHandler: requirePermission('server.create') }, async (req) => {
+    const { id } = req.params as { id: string };
+    const result = await ctx.apps.allocateExtraPort(id);
+    await writeAudit(ctx.db, {
+      actor: 'user', userId: req.authedUser!.id, action: 'app.port.allocate',
+      targetType: 'application', targetId: id, args: result, success: true, ip: req.ip,
+    });
+    return result;
+  });
+
   app.delete('/:id', { preHandler: requirePermission('server.delete') }, async (req) => {
     const { id } = req.params as { id: string };
     const taskId = await ctx.apps.requestDelete(id, req.authedUser!.id);

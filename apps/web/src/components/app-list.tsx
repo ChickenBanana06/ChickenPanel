@@ -113,6 +113,7 @@ export function CreateAppModal({
   const [mcView, setMcView] = useState(10);
   const [mcSim, setMcSim] = useState(10);
   const [mcAutoStart, setMcAutoStart] = useState(true);
+  const [mcEula, setMcEula] = useState(false);
 
   const effectiveType = type || types[0]?.type || '';
   const effectiveNode = nodeId || nodes[0]?.id || '';
@@ -137,6 +138,7 @@ export function CreateAppModal({
           software: mcSoftware, version: effectiveMcVersion, memoryMb: mcMemory,
           difficulty: mcDifficulty, gamemode: mcGamemode,
           viewDistance: mcView, simulationDistance: mcSim, autoStart: mcAutoStart,
+          eulaAccepted: mcEula,
         };
       } else {
         if (startCommand) config.startCommand = startCommand;
@@ -223,6 +225,16 @@ export function CreateAppModal({
               <input type="checkbox" checked={mcAutoStart} onChange={(e) => setMcAutoStart(e.target.checked)} />
               Start automatically after install
             </label>
+            <label className="col-span-2 flex items-start gap-2 text-xs border border-warn/30 bg-warn/5 rounded-lg p-3">
+              <input type="checkbox" className="mt-0.5" checked={mcEula} onChange={(e) => setMcEula(e.target.checked)} />
+              <span>
+                I agree to the{' '}
+                <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                  Minecraft End User License Agreement
+                </a>
+                . The server will not start without accepting it.
+              </span>
+            </label>
           </div>
         ) : (
           <div className="space-y-3">
@@ -250,7 +262,11 @@ export function CreateAppModal({
 
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={busy || !name || !effectiveNode || !effectiveType} onClick={() => void create()}>
+          <Button
+            variant="primary"
+            disabled={busy || !name || !effectiveNode || !effectiveType || (effectiveType === 'minecraft' && !mcEula)}
+            onClick={() => void create()}
+          >
             {busy ? 'Creating…' : 'Create'}
           </Button>
         </div>

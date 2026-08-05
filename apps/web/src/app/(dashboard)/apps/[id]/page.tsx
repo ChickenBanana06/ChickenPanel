@@ -111,7 +111,9 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
         ))}
       </div>
 
-      {tab === 'console' && <ConsoleTab appId={id} running={app.status === 'running'} />}
+      {tab === 'console' && (
+        <ConsoleTab appId={id} running={app.status === 'running'} isMinecraft={app.type === 'minecraft'} />
+      )}
       {tab === 'files' && <FilesTab appId={id} />}
       {tab === 'settings' && <SettingsTab app={app} onSaved={() => void mutate()} />}
       {tab === 'backups' && <BackupsTab appId={id} />}
@@ -127,12 +129,42 @@ function formatUptime(s: number): string {
 
 /* ---------------- Console ---------------- */
 
-function ConsoleTab({ appId, running }: { appId: string; running: boolean }) {
+function ConsoleTab({ appId, running, isMinecraft }: { appId: string; running: boolean; isMinecraft?: boolean }) {
   const toast = useToast();
   const [lines, setLines] = useState<{ stream: string; line: string }[]>([]);
   const [cmd, setCmd] = useState('');
+  const [eulaPrompt, setEulaPrompt] = useState(false);
+  const [eulaDismissed, setEulaDismissed] = useState(false);
+  const [eulaBusy, setEulaBusy] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+
+  const EULA_PATTERN = /agree to the eula|eula\.txt/i;
+
+  useEffect(() => {
+    if (!isMinecraft || running || eulaDismissed) return;
+    if (lines.some((l) => EULA_PATTERN.test(l.line))) setEulaPrompt(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, isMinecraft, running, eulaDismissed]);
+
+  async function acceptEula() {
+    setEulaBusy(true);
+    try {
+      await api('PUT', `/apps/${appId}/files/content`, {
+        path: 'eula.txt',
+        content: '# Accepted by the server owner via NexPanel\neula=true\n',
+      });
+      await api('PATCH', `/apps/${appId}`, { config: { eulaAccepted: true } });
+      await api('POST', `/apps/${appId}/start`);
+      toast('success', 'EULA accepted — server starting');
+      setEulaPrompt(false);
+      setEulaDismissed(true);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Failed to accept EULA');
+    } finally {
+      setEulaBusy(false);
+    }
+  }
 
   useEffect(() => {
     void api<{ lines: { stream: string; line: string }[] }>('GET', `/apps/${appId}/logs?lines=300`)
@@ -154,6 +186,26 @@ function ConsoleTab({ appId, running }: { appId: string; running: boolean }) {
 
   return (
     <Card className="overflow-hidden">
+      <Modal open={eulaPrompt} onClose={() => { setEulaPrompt(false); setEulaDismissed(true); }} title="Minecraft EULA">
+        <div className="space-y-4">
+          <p className="text-sm">
+            The server stopped because the{' '}
+            <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+              Minecraft End User License Agreement
+            </a>{' '}
+            has not been accepted yet.
+          </p>
+          <p className="text-xs text-dim">
+            Accepting will set <code className="console-font">eula=true</code> in <code className="console-font">eula.txt</code> and restart the server.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => { setEulaPrompt(false); setEulaDismissed(true); }}>Not now</Button>
+            <Button variant="primary" disabled={eulaBusy} onClick={() => void acceptEula()}>
+              {eulaBusy ? 'Accepting…' : 'Agree to EULA & restart'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       <div
         ref={boxRef}
         onScroll={(e) => {
@@ -390,8 +442,40 @@ function SettingsTab({ app, onSaved }: { app: AppDetail; onSaved: () => void }) 
   const [configText, setConfigText] = useState(JSON.stringify(app.config, null, 2));
   const [busy, setBusy] = useState(false);
 
+  const [portBusy, setPortBusy] = useState(false);
+
   return (
     <Card className="p-4 space-y-4 max-w-2xl">
+      <Field label="Ports">
+        <div className="flex items-center gap-2 flex-wrap">
+          {app.ports.map((p, i) => (
+            <span key={p} className="console-font text-xs bg-raised border border-edge-strong rounded-lg px-2.5 py-1">
+              {p} <span className="text-faint">({i === 0 ? 'PORT' : `PORT_${i + 1}`})</span>
+            </span>
+          ))}
+          <Button
+            size="sm"
+            disabled={portBusy}
+            onClick={async () => {
+              setPortBusy(true);
+              try {
+                const res = await api<{ port: number; envVar: string }>('POST', `/apps/${app.id}/ports/allocate`);
+                toast('success', `Port ${res.port} allocated as ${res.envVar} — restart to apply`);
+                onSaved();
+              } catch (err) {
+                toast('error', err instanceof Error ? err.message : 'Allocation failed');
+              } finally {
+                setPortBusy(false);
+              }
+            }}
+          >
+            + Allocate port
+          </Button>
+        </div>
+        <p className="text-xs text-faint mt-1.5">
+          Extra ports are passed to the application as PORT_2, PORT_3… environment variables.
+        </p>
+      </Field>
       <Field label="Restart policy">
         <select
           className="rounded-lg bg-panel border border-edge-strong px-3 py-1.5 text-sm"

@@ -105,6 +105,36 @@ export async function auditRoutes(app: FastifyInstance, ctx: AppContext): Promis
 export async function userRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
   const { requirePermission } = makeAuthHooks(ctx);
 
+  /** Admin-created accounts — public registration is disabled after setup. */
+  app.post('/', { preHandler: requirePermission('users.manage') }, async (req) => {
+    const body = req.body as { username?: string; password?: string; email?: string; role?: string };
+    if (!body.username || !/^[a-zA-Z0-9_.-]{3,32}$/.test(body.username)) {
+      throw ApiError.badRequest('Username must be 3-32 characters (letters, numbers, ., _, -)');
+    }
+    if (!body.password || body.password.length < 8 || body.password.length > 256) {
+      throw ApiError.badRequest('Password must be at least 8 characters');
+    }
+    const role = body.role ?? 'USER';
+    if (!['ADMIN', 'USER', 'VIEWER'].includes(role)) throw ApiError.badRequest('Invalid role');
+    const email = body.email?.trim()
+      ? body.email.trim().toLowerCase()
+      : `${body.username.toLowerCase()}@users.nexpanel.local`;
+    const { hashPassword } = await import('../lib/passwords.js');
+    try {
+      const user = await ctx.db.user.create({
+        data: { username: body.username, email, passwordHash: await hashPassword(body.password), role: role as never },
+      });
+      await writeAudit(ctx.db, {
+        actor: 'user', userId: req.authedUser!.id, action: 'user.create',
+        targetType: 'user', targetId: user.id, args: { username: body.username, role }, success: true, ip: req.ip,
+      });
+      return { user: { id: user.id, username: user.username, role: user.role } };
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') throw ApiError.conflict('Username or email already in use');
+      throw err;
+    }
+  });
+
   app.get('/', { preHandler: requirePermission('users.manage') }, async () => {
     const users = await ctx.db.user.findMany({
       select: {

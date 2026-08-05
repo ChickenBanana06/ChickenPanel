@@ -16,6 +16,10 @@ const db = await startEmbeddedPostgres({ dataDir, port });
 console.log(`[nexpanel-db] PostgreSQL ready at ${db.url}`);
 console.log('[nexpanel-db] Press Ctrl+C to stop.');
 
+// Keep the wrapper resident even when it attached to an already-running
+// server (that code path holds no handles, so Node would otherwise exit).
+setInterval(() => undefined, 60_000);
+
 let stopping = false;
 async function shutdown() {
   if (stopping) return;

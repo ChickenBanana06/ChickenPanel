@@ -17,6 +17,8 @@ export const MinecraftConfigSchema = z.object({
   autoStart: z.boolean().default(false),
   /** Preferred port; the allocator falls back automatically if taken. */
   preferredPort: z.number().int().min(1024).max(65535).optional(),
+  /** Explicit consent to the Minecraft EULA (https://aka.ms/MinecraftEULA). */
+  eulaAccepted: z.boolean().default(false),
 });
 export type MinecraftConfig = z.infer<typeof MinecraftConfigSchema>;
 
@@ -55,7 +57,6 @@ export function buildStartCommand(cfg: MinecraftConfig): string[] {
     '-XX:MaxGCPauseMillis=200',
     '-XX:+UnlockExperimentalVMOptions',
     '-XX:+DisableExplicitGC',
-    '-Dcom.mojang.eula.agree=true',
   ];
   return ['java', ...flags, '-jar', 'server.jar', '--nogui'];
 }
@@ -83,7 +84,15 @@ export async function buildMinecraftProvisioning(
 
   const steps: ProvisionStep[] = [
     { op: 'download', url: jar.url, dest: 'server.jar', ...(jar.sha256 ? { sha256: jar.sha256 } : {}) },
-    { op: 'write', path: 'eula.txt', content: '# Accepted via NexPanel setup\neula=true\n', base64: false },
+    {
+      op: 'write',
+      path: 'eula.txt',
+      // Only written as accepted when the user explicitly consented in the UI.
+      content: cfg.eulaAccepted
+        ? '# Accepted by the server owner via NexPanel\neula=true\n'
+        : '# You must accept the Minecraft EULA (https://aka.ms/MinecraftEULA)\neula=false\n',
+      base64: false,
+    },
     { op: 'write', path: 'server.properties', content: buildServerProperties(cfg, port, name), base64: false },
     ...(provider.supportsPlugins ? [{ op: 'mkdir' as const, path: 'plugins' }] : []),
   ];

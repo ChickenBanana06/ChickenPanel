@@ -212,8 +212,68 @@ function Users() {
   const toast = useToast();
   const { data, mutate } = useSWR<{ users: UserRow[] }>('/users', fetcher);
   const users = data?.users ?? [];
+  const [showAdd, setShowAdd] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState('USER');
+  const [busy, setBusy] = useState(false);
+
   return (
-    <Card className="p-4">
+    <Card className="p-4 space-y-3">
+      <div className="flex justify-end">
+        <Button size="sm" variant="primary" onClick={() => setShowAdd(true)}>
+          <span className="flex items-center gap-1"><Plus size={13} /> Add user</span>
+        </Button>
+      </div>
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add user">
+        <div className="space-y-3">
+          <Field label="Username">
+            <Input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} autoFocus placeholder="steve" />
+          </Field>
+          <Field label="Password (min 8 characters)">
+            <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          </Field>
+          <Field label="Email (optional)">
+            <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="steve@example.com" />
+          </Field>
+          <Field label="Role">
+            <Select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+              <option>USER</option>
+              <option>ADMIN</option>
+              <option>VIEWER</option>
+            </Select>
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={busy || newUsername.length < 3 || newPassword.length < 8}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await api('POST', '/users', {
+                    username: newUsername,
+                    password: newPassword,
+                    ...(newEmail ? { email: newEmail } : {}),
+                    role: newRole,
+                  });
+                  toast('success', `User ${newUsername} created`);
+                  setShowAdd(false);
+                  setNewUsername(''); setNewPassword(''); setNewEmail(''); setNewRole('USER');
+                  void mutate();
+                } catch (err) {
+                  toast('error', err instanceof Error ? err.message : 'Create failed');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Create user
+            </Button>
+          </div>
+        </div>
+      </Modal>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-faint border-b border-edge">

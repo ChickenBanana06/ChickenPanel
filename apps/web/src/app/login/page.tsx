@@ -12,7 +12,7 @@ export default function LoginPage() {
   const toast = useToast();
   const { refresh } = useAuth();
   const { data: setup } = useSWR<{ needsSetup: boolean }>('/auth/setup-status', fetcher);
-  const [mode, setMode] = useState<'login' | 'register' | null>(null);
+  const [mode] = useState<'login' | 'register' | null>(null);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -75,12 +75,9 @@ export default function LoginPage() {
           </Button>
         </form>
         {!setup?.needsSetup && (
-          <button
-            className="mt-4 text-xs text-dim hover:text-ink w-full text-center"
-            onClick={() => setMode(effectiveMode === 'login' ? 'register' : 'login')}
-          >
-            {effectiveMode === 'login' ? 'Need an account? Register' : 'Have an account? Sign in'}
-          </button>
+          <p className="mt-4 text-xs text-faint text-center">
+            Accounts are created by an administrator in Settings → Users.
+          </p>
         )}
       </Card>
     </div>
