@@ -87,7 +87,7 @@ export class ExecService {
 
     const exitCode = await new Promise<number | null>((resolve) => {
       child.once('error', (err) => {
-        onOutput('stderr', `[nexpanel] spawn failed: ${err.message}\n`);
+        onOutput('stderr', `[chickenpanel] spawn failed: ${err.message}\n`);
         resolve(null);
       });
       child.once('exit', (code) => resolve(code));

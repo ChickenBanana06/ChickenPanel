@@ -180,7 +180,7 @@ export class AppSupervisor {
       this.events.onStatus(appId, 'running');
     });
     child.once('error', (err) => {
-      append('stderr')(`[nexpanel] failed to start: ${err.message}`);
+      append('stderr')(`[chickenpanel] failed to start: ${err.message}`);
       this.running.delete(appId);
       this.saveState();
       this.events.onStatus(appId, 'errored', null);
@@ -189,7 +189,7 @@ export class AppSupervisor {
       const wasStopping = run.stopping;
       this.running.delete(appId);
       this.saveState();
-      append('stdout')(`[nexpanel] process exited with code=${code ?? 'null'} signal=${signal ?? 'none'}`);
+      append('stdout')(`[chickenpanel] process exited with code=${code ?? 'null'} signal=${signal ?? 'none'}`);
       if (wasStopping) {
         this.events.onStatus(appId, 'stopped', code);
         return;
@@ -229,9 +229,9 @@ export class AppSupervisor {
 
   private appendSystemLog(appId: string, message: string): void {
     const buf = this.logs.get(appId) ?? [];
-    buf.push({ stream: 'stdout', line: `[nexpanel] ${message}` });
+    buf.push({ stream: 'stdout', line: `[chickenpanel] ${message}` });
     this.logs.set(appId, buf);
-    this.events.onLog(appId, 'stdout', `[nexpanel] ${message}`);
+    this.events.onLog(appId, 'stdout', `[chickenpanel] ${message}`);
   }
 
   async stopApp(appId: string, opts?: { silent?: boolean }): Promise<void> {

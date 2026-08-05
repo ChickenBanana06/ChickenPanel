@@ -64,7 +64,7 @@ export class AgentConnection {
     if (this.closed) return;
     const url = agentWsUrl(this.config.panelUrl);
     console.log(`[agent] connecting to ${url}`);
-    const ws = new WebSocket(url, { maxPayload: 32 * 1024 * 1024 });
+    const ws = new WebSocket(url, { maxPayload: 128 * 1024 * 1024 });
     this.ws = ws;
 
     ws.on('open', async () => {

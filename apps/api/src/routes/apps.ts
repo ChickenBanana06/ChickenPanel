@@ -7,7 +7,10 @@ import { writeAudit } from '../lib/audit.js';
 import { ApiError } from '../lib/errors.js';
 
 function requirePath(input: unknown): string {
-  const p = safeRelativePath(String(input ?? ''));
+  const raw = String(input ?? '');
+  // "" and "." both mean the application root — valid for listing/search.
+  if (raw === '' || raw === '.') return '.';
+  const p = safeRelativePath(raw);
   if (p === null) throw ApiError.badRequest('Invalid path');
   return p;
 }

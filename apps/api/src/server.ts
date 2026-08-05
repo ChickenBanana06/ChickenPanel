@@ -55,7 +55,7 @@ export async function buildServer(config: ApiConfig): Promise<BuiltServer> {
   const app = Fastify({
     logger: { level: process.env.NEXPANEL_LOG_LEVEL ?? 'info' },
     trustProxy: config.trustProxy,
-    bodyLimit: 12 * 1024 * 1024,
+    bodyLimit: 96 * 1024 * 1024,
   });
 
   // Tolerate empty JSON bodies on action endpoints (POST without payload).

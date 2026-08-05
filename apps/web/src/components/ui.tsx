@@ -100,8 +100,16 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 
 /* ---------------- Card / Badge ---------------- */
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx('bg-panel border border-edge rounded-xl', className)}>{children}</div>;
+export function Card({
+  children,
+  className,
+  ...rest
+}: { children: ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx('bg-panel border border-edge rounded-xl', className)} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 const STATUS_COLORS: Record<string, string> = {

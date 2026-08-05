@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import { Play, Square, RotateCw, Skull, Trash2, Folder, FileText, ArrowLeft, Download, FolderPlus, Pencil, Copy, Eye, EyeOff } from 'lucide-react';
+import { Play, Square, RotateCw, Skull, Trash2, Folder, FileText, ArrowLeft, Download, FolderPlus, Pencil, Copy, Eye, EyeOff, Upload } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
 import { Button, Card, EmptyState, Field, Input, Modal, Spinner, StatusBadge, cx, useToast, ProgressBar } from '@/components/ui';
@@ -339,6 +339,8 @@ function ConsoleTab({ appId, running, isMinecraft }: { appId: string; running: b
 
 interface FileEntry { name: string; path: string; type: 'file' | 'directory'; sizeBytes: number; modifiedAt: string }
 
+const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+
 function FilesTab({ appId }: { appId: string }) {
   const toast = useToast();
   const [path, setPath] = useState('.');
@@ -347,6 +349,10 @@ function FilesTab({ appId }: { appId: string }) {
   const [editing, setEditing] = useState<{ path: string; content: string; truncated: boolean } | null>(null);
   const [newFolder, setNewFolder] = useState(false);
   const [folderName, setFolderName] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
 
   async function load(p: string) {
     setLoading(true);
@@ -365,10 +371,82 @@ function FilesTab({ appId }: { appId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appId]);
 
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.slice(result.indexOf(',') + 1)); // strip data: prefix
+      };
+      reader.onerror = () => reject(new Error('Could not read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    for (const file of list) {
+      if (file.size > MAX_UPLOAD_BYTES) {
+        toast('error', `${file.name} is too large (max 64 MB)`);
+        continue;
+      }
+      setUploading(file.name);
+      try {
+        const base64 = await fileToBase64(file);
+        const dest = path === '.' ? file.name : `${path}/${file.name}`;
+        await api('PUT', `/apps/${appId}/files/content`, { path: dest, content: base64, base64: true });
+        toast('success', `Uploaded ${file.name}`);
+      } catch (err) {
+        toast('error', `${file.name}: ${err instanceof Error ? err.message : 'upload failed'}`);
+      } finally {
+        setUploading(null);
+      }
+    }
+    void load(path);
+  }
+
   const crumbs = path === '.' ? [] : path.split('/');
 
   return (
-    <Card className="p-4 space-y-3">
+    <Card
+      className={cx('p-4 space-y-3 relative transition-colors', dragOver && 'ring-2 ring-accent bg-accent/5')}
+      onDragEnter={(e) => {
+        e.preventDefault();
+        dragDepth.current += 1;
+        if (e.dataTransfer.types.includes('Files')) setDragOver(true);
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        dragDepth.current -= 1;
+        if (dragDepth.current <= 0) setDragOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDragOver(false);
+        if (e.dataTransfer.files.length > 0) void uploadFiles(e.dataTransfer.files);
+      }}
+    >
+      {dragOver && (
+        <div className="absolute inset-0 z-10 grid place-items-center rounded-xl bg-bg/80 border-2 border-dashed border-accent pointer-events-none">
+          <div className="text-center">
+            <Upload className="mx-auto text-accent mb-2" size={28} />
+            <p className="text-sm text-accent font-medium">Drop files to upload to /{path === '.' ? '' : path}</p>
+          </div>
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) void uploadFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
       <div className="flex items-center gap-2 text-xs">
         <button className="text-accent hover:underline" onClick={() => void load('.')}>root</button>
         {crumbs.map((c, i) => (
@@ -380,6 +458,14 @@ function FilesTab({ appId }: { appId: string }) {
           </span>
         ))}
         <div className="flex-1" />
+        {uploading && (
+          <span className="flex items-center gap-1.5 text-dim">
+            <Spinner className="w-3 h-3" /> uploading {uploading}…
+          </span>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()}>
+          <span className="flex items-center gap-1"><Upload size={12} /> Upload</span>
+        </Button>
         <Button size="sm" variant="ghost" onClick={() => setNewFolder(true)}>
           <span className="flex items-center gap-1"><FolderPlus size={12} /> New folder</span>
         </Button>
@@ -387,7 +473,9 @@ function FilesTab({ appId }: { appId: string }) {
       </div>
 
       <div className="divide-y divide-edge/50">
-        {entries.length === 0 && !loading && <EmptyState title="Empty directory" />}
+        {entries.length === 0 && !loading && (
+          <EmptyState title="Empty directory" hint="Drag files here or use Upload to add them" />
+        )}
         {entries.map((e) => (
           <div key={e.path} className="flex items-center gap-2.5 py-1.5 px-1 hover:bg-hover/50 rounded group">
             {e.type === 'directory' ? <Folder size={14} className="text-accent" /> : <FileText size={14} className="text-dim" />}

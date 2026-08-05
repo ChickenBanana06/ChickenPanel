@@ -80,7 +80,8 @@ export const UIResponseSchema = z.object({
 
 export const FileWriteSchema = z.object({
   path: z.string().min(1).max(4096),
-  content: z.string().max(10485760),
+  // Large enough for base64-encoded uploads up to ~64 MB.
+  content: z.string().max(94371840),
   base64: z.boolean().default(false),
 });
 

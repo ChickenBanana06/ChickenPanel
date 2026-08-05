@@ -31,7 +31,7 @@ const backups = new BackupManager(sandbox, apps);
 
 connection = new AgentConnection(config, { apps, files, exec, provisioner, backups, sandbox });
 
-console.log(`[agent] NexPanel agent starting on ${platform.id} (data: ${config.dataDir})`);
+console.log(`[agent] ChickenPanel agent starting on ${platform.id} (data: ${config.dataDir})`);
 apps.start();
 connection.start();
 
