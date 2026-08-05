@@ -6,7 +6,7 @@ import useSWR from 'swr';
 import { Plus } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
-import { Button, Card, EmptyState, Field, Input, Modal, Select, StatusBadge, useToast } from '@/components/ui';
+import { Button, Card, EmptyState, Field, Input, Modal, Select, StatusBadge, useToast, cx } from '@/components/ui';
 
 interface AppRow {
   id: string; name: string; type: string; status: string;
@@ -114,6 +114,10 @@ export function CreateAppModal({
   const [mcSim, setMcSim] = useState(10);
   const [mcAutoStart, setMcAutoStart] = useState(true);
   const [mcEula, setMcEula] = useState(false);
+  const [mcCustomMode, setMcCustomMode] = useState<'url' | 'upload'>('url');
+  const [mcCustomUrl, setMcCustomUrl] = useState('');
+  const [mcCustomFile, setMcCustomFile] = useState<File | null>(null);
+  const [mcIsProxy, setMcIsProxy] = useState(false);
   // database config
   const [dbMemory, setDbMemory] = useState(0);
   const [dbName, setDbName] = useState('appdb');
@@ -135,13 +139,22 @@ export function CreateAppModal({
         const idx = line.indexOf('=');
         if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
       }
+      const isCustomMc = effectiveType === 'minecraft' && mcSoftware === 'custom';
+      const customUpload = isCustomMc && mcCustomMode === 'upload' && mcCustomFile;
       let config: Record<string, unknown> = {};
       if (effectiveType === 'minecraft') {
         config = {
-          software: mcSoftware, version: effectiveMcVersion, memoryMb: mcMemory,
+          software: mcSoftware,
+          version: mcSoftware === 'custom' ? 'custom' : effectiveMcVersion,
+          memoryMb: mcMemory,
           difficulty: mcDifficulty, gamemode: mcGamemode,
-          viewDistance: mcView, simulationDistance: mcSim, autoStart: mcAutoStart,
+          viewDistance: mcView, simulationDistance: mcSim,
+          // Upload-based custom jars must not auto-start before the jar is uploaded.
+          autoStart: customUpload ? false : mcAutoStart,
           eulaAccepted: mcEula,
+          isProxy: mcIsProxy,
+          ...(isCustomMc && mcCustomMode === 'url' && mcCustomUrl ? { customJarUrl: mcCustomUrl } : {}),
+          ...(customUpload ? { customUploaded: true } : {}),
         };
       } else if (effectiveType === 'redis') {
         if (dbMemory) config.maxMemoryMb = dbMemory;
@@ -157,7 +170,22 @@ export function CreateAppModal({
       const res = await api<{ application: { id: string } }>('POST', '/apps', {
         name, type: effectiveType, nodeId: effectiveNode, config, env,
       });
-      toast('success', 'Application created — provisioning started');
+      // For a custom uploaded jar, push it to server.jar after creation.
+      if (customUpload && mcCustomFile) {
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const r = reader.result as string;
+            resolve(r.slice(r.indexOf(',') + 1));
+          };
+          reader.onerror = () => reject(new Error('Could not read jar'));
+          reader.readAsDataURL(mcCustomFile);
+        });
+        await api('PUT', `/apps/${res.application.id}/files/content`, { path: 'server.jar', content: b64, base64: true });
+        toast('success', 'Server created and jar uploaded — start it when provisioning finishes');
+      } else {
+        toast('success', 'Application created — provisioning started');
+      }
       onCreated(res.application.id);
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Create failed');
@@ -202,15 +230,49 @@ export function CreateAppModal({
                 ]).map((s: { id: string; displayName: string }) => (
                   <option key={s.id} value={s.id}>{s.displayName}</option>
                 ))}
+                <option value="custom">Custom JAR (any software / upload / URL)</option>
               </Select>
             </Field>
-            <Field label="Version">
-              <Select value={effectiveMcVersion} onChange={(e) => setMcVersion(e.target.value)}>
-                {softwareVersions.map((v) => (
-                  <option key={v.version} value={v.version}>{v.version}{v.stable ? '' : ' (unstable)'}</option>
-                ))}
-              </Select>
-            </Field>
+            {mcSoftware === 'custom' ? (
+              <Field label="Custom server jar">
+                <div className="space-y-2">
+                  <div className="flex gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      className={cx('px-2 py-1 rounded-lg border', mcCustomMode === 'url' ? 'border-accent text-accent' : 'border-edge-strong text-dim')}
+                      onClick={() => setMcCustomMode('url')}
+                    >
+                      From URL
+                    </button>
+                    <button
+                      type="button"
+                      className={cx('px-2 py-1 rounded-lg border', mcCustomMode === 'upload' ? 'border-accent text-accent' : 'border-edge-strong text-dim')}
+                      onClick={() => setMcCustomMode('upload')}
+                    >
+                      Upload .jar
+                    </button>
+                  </div>
+                  {mcCustomMode === 'url' ? (
+                    <Input value={mcCustomUrl} onChange={(e) => setMcCustomUrl(e.target.value)} placeholder="https://.../server.jar" />
+                  ) : (
+                    <input
+                      type="file"
+                      accept=".jar"
+                      className="text-xs text-dim"
+                      onChange={(e) => setMcCustomFile(e.target.files?.[0] ?? null)}
+                    />
+                  )}
+                </div>
+              </Field>
+            ) : (
+              <Field label="Version">
+                <Select value={effectiveMcVersion} onChange={(e) => setMcVersion(e.target.value)}>
+                  {softwareVersions.map((v) => (
+                    <option key={v.version} value={v.version}>{v.version}{v.stable ? '' : ' (unstable)'}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="Memory (MB)">
               <Input type="number" min={512} value={mcMemory} onChange={(e) => setMcMemory(Number(e.target.value))} />
             </Field>
@@ -234,16 +296,30 @@ export function CreateAppModal({
               <input type="checkbox" checked={mcAutoStart} onChange={(e) => setMcAutoStart(e.target.checked)} />
               Start automatically after install
             </label>
-            <label className="col-span-2 flex items-start gap-2 text-xs border border-warn/30 bg-warn/5 rounded-lg p-3">
-              <input type="checkbox" className="mt-0.5" checked={mcEula} onChange={(e) => setMcEula(e.target.checked)} />
-              <span>
-                I agree to the{' '}
-                <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                  Minecraft End User License Agreement
-                </a>
-                . The server will not start without accepting it.
-              </span>
-            </label>
+            {mcSoftware === 'custom' && (
+              <label className="flex items-center gap-2 text-xs text-dim mt-5">
+                <input type="checkbox" checked={mcIsProxy} onChange={(e) => setMcIsProxy(e.target.checked)} />
+                This is a proxy (Velocity / BungeeCord)
+              </label>
+            )}
+            {!mcIsProxy && (
+              <label className="col-span-2 flex items-start gap-2 text-xs border border-warn/30 bg-warn/5 rounded-lg p-3">
+                <input type="checkbox" className="mt-0.5" checked={mcEula} onChange={(e) => setMcEula(e.target.checked)} />
+                <span>
+                  I agree to the{' '}
+                  <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                    Minecraft End User License Agreement
+                  </a>
+                  . The server will not start without accepting it.
+                </span>
+              </label>
+            )}
+            {mcSoftware === 'custom' && (
+              <p className="col-span-2 text-xs text-faint">
+                Custom JAR supports any Java server software — Spigot, Forge, NeoForge, Fabric, Mohist, Folia, proxies and more.
+                Upload the jar or provide a direct download URL.
+              </p>
+            )}
           </div>
         ) : ['redis', 'postgres', 'mysql'].includes(effectiveType) ? (
           <div className="space-y-3">
@@ -293,7 +369,12 @@ export function CreateAppModal({
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={busy || !name || !effectiveNode || !effectiveType || (effectiveType === 'minecraft' && !mcEula)}
+            disabled={
+              busy || !name || !effectiveNode || !effectiveType ||
+              (effectiveType === 'minecraft' && !mcIsProxy && !mcEula) ||
+              (effectiveType === 'minecraft' && mcSoftware === 'custom' && mcCustomMode === 'url' && !mcCustomUrl) ||
+              (effectiveType === 'minecraft' && mcSoftware === 'custom' && mcCustomMode === 'upload' && !mcCustomFile)
+            }
             onClick={() => void create()}
           >
             {busy ? 'Creating…' : 'Create'}

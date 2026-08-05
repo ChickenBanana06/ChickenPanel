@@ -41,24 +41,30 @@ export const minecraftExtension: ApplicationExtension = {
     const [port] = await ctx.allocatePorts(input.nodeId, 1, cfg.preferredPort ? [cfg.preferredPort] : []);
     if (!port) throw new Error('Port allocation failed');
     const env = { ...input.env };
-    const plan = await buildMinecraftProvisioning(input.name, cfg, port, env, input.restartPolicy);
+    const platform = (input.node.platform ?? 'linux') as 'win32' | 'linux' | 'darwin';
+    const caps = (input.node.capabilities ?? {}) as { java?: string | null };
+    const plan = await buildMinecraftProvisioning(input.name, cfg, port, env, input.restartPolicy, {
+      platform,
+      hasJava: Boolean(caps.java),
+    });
     return {
       spec: { appId: 'pending', ...plan.spec },
       steps: plan.steps,
       ports: [port],
-      config: { ...cfg, port },
+      config: { ...plan.effectiveConfig, port },
       env,
     };
   },
 
   buildRuntimeSpec(app: Application) {
     const cfg = MinecraftConfigSchema.parse(app.config);
+    const proxy = cfg.isProxy;
     return {
       appId: app.id,
       name: app.name,
       type: 'minecraft',
       startCommand: buildStartCommand(cfg),
-      stopMethod: { type: 'stdin', command: 'stop' },
+      stopMethod: proxy ? { type: 'stdin', command: 'end' } : { type: 'stdin', command: 'stop' },
       stopGraceSeconds: 60,
       env: (app.env as Record<string, string>) ?? {},
       restartPolicy: app.restartPolicy as never,

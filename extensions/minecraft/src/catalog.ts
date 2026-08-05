@@ -81,6 +81,37 @@ class VanillaProvider implements SoftwareProvider {
   }
 }
 
+/** Vanilla snapshots (development versions) from the same Mojang manifest. */
+class SnapshotProvider implements SoftwareProvider {
+  id = 'snapshot';
+  displayName = 'Snapshot';
+  supportsPlugins = false;
+
+  async listVersions(): Promise<SoftwareVersion[]> {
+    const manifest = await cached('vanilla:manifest', () =>
+      getJson<MojangManifest>('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'),
+    );
+    return manifest.versions
+      .filter((v) => v.type === 'snapshot')
+      .slice(0, 40)
+      .map((v) => ({ version: v.id, stable: false }));
+  }
+
+  async resolveJar(version: string): Promise<ResolvedServerJar> {
+    const manifest = await cached('vanilla:manifest', () =>
+      getJson<MojangManifest>('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'),
+    );
+    const entry = manifest.versions.find((v) => v.id === version);
+    if (!entry) throw new Error(`Unknown snapshot: ${version}`);
+    const detail = await cached(`vanilla:${version}`, () =>
+      getJson<{ downloads: { server?: { url: string; sha1: string } } }>(entry.url),
+    );
+    const server = detail.downloads.server;
+    if (!server) throw new Error(`Snapshot ${version} has no server download`);
+    return { url: server.url, fileName: 'server.jar' };
+  }
+}
+
 /* ---------------- Paper (PaperMC fill v3) ---------------- */
 
 interface PaperVersionsResponse {
@@ -93,14 +124,18 @@ interface PaperBuildsResponse {
   downloads: Record<string, { name: string; url: string; checksums: { sha256: string } }>;
 }
 
-class PaperProvider implements SoftwareProvider {
-  id = 'paper';
-  displayName = 'Paper';
-  supportsPlugins = true;
+/** Any PaperMC-hosted project (paper, folia, velocity, waterfall) via fill v3. */
+class PaperMcProvider implements SoftwareProvider {
+  constructor(
+    readonly id: string,
+    readonly displayName: string,
+    private readonly project: string,
+    readonly supportsPlugins: boolean,
+  ) {}
 
   async listVersions(): Promise<SoftwareVersion[]> {
-    const data = await cached('paper:versions', () =>
-      getJson<PaperVersionsResponse>('https://fill.papermc.io/v3/projects/paper/versions'),
+    const data = await cached(`${this.project}:versions`, () =>
+      getJson<PaperVersionsResponse>(`https://fill.papermc.io/v3/projects/${this.project}/versions`),
     );
     return data.versions.slice(0, 60).map((v) => ({
       version: v.version.id,
@@ -109,23 +144,81 @@ class PaperProvider implements SoftwareProvider {
   }
 
   async resolveJar(version: string): Promise<ResolvedServerJar> {
-    const builds = await cached(`paper:${version}:builds`, () =>
+    const builds = await cached(`${this.project}:${version}:builds`, () =>
       getJson<PaperBuildsResponse[]>(
-        `https://fill.papermc.io/v3/projects/paper/versions/${encodeURIComponent(version)}/builds`,
+        `https://fill.papermc.io/v3/projects/${this.project}/versions/${encodeURIComponent(version)}/builds`,
       ),
     );
     const best = builds.find((b) => b.channel === 'STABLE') ?? builds[0];
-    if (!best) throw new Error(`No Paper builds for ${version}`);
-    const dl = best.downloads['server:default'];
-    if (!dl) throw new Error(`No default server download for Paper ${version} build ${best.id}`);
-    return { url: dl.url, sha256: dl.checksums.sha256, fileName: 'server.jar' };
+    if (!best) throw new Error(`No ${this.displayName} builds for ${version}`);
+    const dl = best.downloads['server:default'] ?? Object.values(best.downloads)[0];
+    if (!dl) throw new Error(`No download for ${this.displayName} ${version} build ${best.id}`);
+    return { url: dl.url, sha256: dl.checksums?.sha256, fileName: 'server.jar' };
+  }
+}
+
+/** Purpur (purpurmc.org API). */
+class PurpurProvider implements SoftwareProvider {
+  id = 'purpur';
+  displayName = 'Purpur';
+  supportsPlugins = true;
+
+  async listVersions(): Promise<SoftwareVersion[]> {
+    const data = await cached('purpur:versions', () =>
+      getJson<{ versions: string[] }>('https://api.purpurmc.org/v2/purpur'),
+    );
+    return [...data.versions].reverse().slice(0, 60).map((v) => ({ version: v, stable: true }));
+  }
+
+  async resolveJar(version: string): Promise<ResolvedServerJar> {
+    // The API exposes a stable "latest build download" URL per version.
+    return { url: `https://api.purpurmc.org/v2/purpur/${encodeURIComponent(version)}/latest/download`, fileName: 'server.jar' };
+  }
+}
+
+/** Leaves (leavesmc.org API, Paper-v2 style). */
+class LeavesProvider implements SoftwareProvider {
+  id = 'leaves';
+  displayName = 'Leaves';
+  supportsPlugins = true;
+
+  async listVersions(): Promise<SoftwareVersion[]> {
+    const data = await cached('leaves:versions', () =>
+      getJson<{ versions: string[] }>('https://api.leavesmc.org/v2/projects/leaves'),
+    );
+    return [...data.versions].reverse().slice(0, 60).map((v) => ({ version: v, stable: true }));
+  }
+
+  async resolveJar(version: string): Promise<ResolvedServerJar> {
+    const builds = await cached(`leaves:${version}:builds`, () =>
+      getJson<{ builds: number[] }>(`https://api.leavesmc.org/v2/projects/leaves/versions/${encodeURIComponent(version)}`),
+    );
+    const build = builds.builds[builds.builds.length - 1];
+    if (!build) throw new Error(`No Leaves builds for ${version}`);
+    const info = await getJson<{ downloads: { application: { name: string } } }>(
+      `https://api.leavesmc.org/v2/projects/leaves/versions/${encodeURIComponent(version)}/builds/${build}`,
+    );
+    const name = info.downloads.application.name;
+    return {
+      url: `https://api.leavesmc.org/v2/projects/leaves/versions/${encodeURIComponent(version)}/builds/${build}/downloads/${name}`,
+      fileName: 'server.jar',
+    };
   }
 }
 
 export const softwareProviders: Record<string, SoftwareProvider> = {
   vanilla: new VanillaProvider(),
-  paper: new PaperProvider(),
+  snapshot: new SnapshotProvider(),
+  paper: new PaperMcProvider('paper', 'Paper', 'paper', true),
+  purpur: new PurpurProvider(),
+  folia: new PaperMcProvider('folia', 'Folia', 'folia', true),
+  leaves: new LeavesProvider(),
+  velocity: new PaperMcProvider('velocity', 'Velocity (proxy)', 'velocity', false),
+  waterfall: new PaperMcProvider('waterfall', 'Waterfall (proxy)', 'waterfall', false),
 };
+
+/** Software ids that are proxies (no eula.txt/server.properties, no --nogui). */
+export const PROXY_SOFTWARE = new Set(['velocity', 'waterfall', 'bungeecord']);
 
 export async function getMinecraftCatalog(): Promise<{
   software: { id: string; displayName: string; supportsPlugins: boolean; versions: SoftwareVersion[] }[];

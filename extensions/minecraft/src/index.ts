@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import type { AppRuntimeSpec, ProvisionStep } from '@nexpanel/shared';
-import { getMinecraftCatalog, softwareProviders } from './catalog.js';
+import { getMinecraftCatalog, softwareProviders, PROXY_SOFTWARE } from './catalog.js';
 
 export * from './catalog.js';
 
 export const MinecraftConfigSchema = z.object({
-  software: z.enum(['vanilla', 'paper']).default('paper'),
-  version: z.string().min(1).max(32),
+  // Any registered software id, or "custom" for an uploaded/URL jar.
+  software: z.string().min(1).max(32).default('paper'),
+  version: z.string().min(1).max(64).default('custom'),
   memoryMb: z.number().int().min(512).max(262144).default(4096),
   difficulty: z.enum(['peaceful', 'easy', 'normal', 'hard']).default('normal'),
   gamemode: z.enum(['survival', 'creative', 'adventure', 'spectator']).default('survival'),
@@ -15,12 +16,24 @@ export const MinecraftConfigSchema = z.object({
   maxPlayers: z.number().int().min(1).max(1000).default(20),
   motd: z.string().max(150).optional(),
   autoStart: z.boolean().default(false),
-  /** Preferred port; the allocator falls back automatically if taken. */
   preferredPort: z.number().int().min(1024).max(65535).optional(),
-  /** Explicit consent to the Minecraft EULA (https://aka.ms/MinecraftEULA). */
   eulaAccepted: z.boolean().default(false),
+  /** For software="custom": download this jar URL as server.jar (https only). */
+  customJarUrl: z.string().url().optional(),
+  /** For software="custom": true if the jar was/will be uploaded to server.jar. */
+  customUploaded: z.boolean().default(false),
+  /** Treat as a proxy (Velocity/BungeeCord): no eula/server.properties, no --nogui. */
+  isProxy: z.boolean().default(false),
+  /** Extra JVM/server flags supplied by the user (custom software). */
+  extraFlags: z.array(z.string().max(200)).max(30).optional(),
+  /** Resolved java executable path (set during provisioning). */
+  javaPath: z.string().optional(),
 });
 export type MinecraftConfig = z.infer<typeof MinecraftConfigSchema>;
+
+function isProxySoftware(cfg: MinecraftConfig): boolean {
+  return cfg.isProxy || PROXY_SOFTWARE.has(cfg.software);
+}
 
 export function buildServerProperties(cfg: MinecraftConfig, port: number, name: string): string {
   const props: Record<string, string | number | boolean> = {
@@ -46,30 +59,46 @@ export function buildServerProperties(cfg: MinecraftConfig, port: number, name: 
   );
 }
 
+/** Adoptium (Eclipse Temurin) portable JRE 21 download for the platform. */
+function temurinUrl(platform: 'win32' | 'linux'): string {
+  const os = platform === 'win32' ? 'windows' : 'linux';
+  return `https://api.adoptium.net/v3/binary/latest/21/ga/${os}/x64/jre/hotspot/normal/eclipse`;
+}
+
 export function buildStartCommand(cfg: MinecraftConfig): string[] {
+  const java = cfg.javaPath ?? 'java';
   const mem = cfg.memoryMb;
   const flags = [
     `-Xms${Math.min(mem, Math.max(512, Math.floor(mem / 2)))}M`,
     `-Xmx${mem}M`,
-    // Aikar-style flags, safe for both vanilla and Paper
     '-XX:+UseG1GC',
     '-XX:+ParallelRefProcEnabled',
     '-XX:MaxGCPauseMillis=200',
     '-XX:+UnlockExperimentalVMOptions',
     '-XX:+DisableExplicitGC',
+    ...(cfg.extraFlags ?? []),
   ];
-  return ['java', ...flags, '-jar', 'server.jar', '--nogui'];
+  // Proxies must not get --nogui (they have no GUI to suppress and reject it).
+  const tail = isProxySoftware(cfg) ? [] : ['--nogui'];
+  return [java, ...flags, '-jar', 'server.jar', ...tail];
 }
 
 export interface MinecraftCreationPlan {
   spec: Omit<AppRuntimeSpec, 'appId'>;
   steps: ProvisionStep[];
   port: number;
+  /** Effective config (with resolved javaPath) to persist. */
+  effectiveConfig: MinecraftConfig;
+}
+
+export interface RuntimeContext {
+  platform: 'win32' | 'linux' | 'darwin';
+  hasJava: boolean;
 }
 
 /**
- * Compile a Minecraft server creation into generic agent provisioning steps.
- * The port must already be allocated by the caller.
+ * Compile a Minecraft server creation into generic agent provisioning steps,
+ * including a portable Java download when the node has none.
  */
 export async function buildMinecraftProvisioning(
   name: string,
@@ -77,32 +106,75 @@ export async function buildMinecraftProvisioning(
   port: number,
   env: Record<string, string>,
   restartPolicy: 'never' | 'on-crash' | 'always',
+  runtime: RuntimeContext,
 ): Promise<MinecraftCreationPlan> {
-  const provider = softwareProviders[cfg.software];
-  if (!provider) throw new Error(`Unsupported software: ${cfg.software}`);
-  const jar = await provider.resolveJar(cfg.version);
+  const steps: ProvisionStep[] = [];
+  const proxy = isProxySoftware(cfg);
+  let supportsPlugins = !proxy;
 
-  const steps: ProvisionStep[] = [
-    { op: 'download', url: jar.url, dest: 'server.jar', ...(jar.sha256 ? { sha256: jar.sha256 } : {}) },
-    {
-      op: 'write',
-      path: 'eula.txt',
-      // Only written as accepted when the user explicitly consented in the UI.
-      content: cfg.eulaAccepted
-        ? '# Accepted by the server owner via ChickenPanel\neula=true\n'
-        : '# You must accept the Minecraft EULA (https://aka.ms/MinecraftEULA)\neula=false\n',
-      base64: false,
-    },
-    { op: 'write', path: 'server.properties', content: buildServerProperties(cfg, port, name), base64: false },
-    ...(provider.supportsPlugins ? [{ op: 'mkdir' as const, path: 'plugins' }] : []),
-  ];
+  /* -------- Java runtime -------- */
+  let javaPath = 'java';
+  const platform = runtime.platform === 'darwin' ? 'linux' : runtime.platform;
+  if (!runtime.hasJava) {
+    // Download a portable JRE and normalize the extracted folder to "runtime".
+    const ext = platform === 'win32' ? 'zip' : 'tar.gz';
+    steps.push(
+      { op: 'download', url: temurinUrl(platform), dest: `_java/jre.${ext}` },
+      { op: 'extract', archive: `_java/jre.${ext}`, dest: '_java' },
+      {
+        op: 'exec',
+        // Rename the versioned "jdk-*"/"jre-*" folder to a stable "runtime" dir.
+        command: [
+          'node',
+          '-e',
+          'const fs=require("fs");const d=fs.readdirSync("_java").find(x=>/^(jdk|jre)/.test(x));if(!d)throw new Error("JRE not found after extract");fs.rmSync("runtime",{recursive:true,force:true});fs.renameSync("_java/"+d,"runtime");',
+        ],
+        cwd: '.',
+        timeoutMs: 120000,
+      },
+    );
+    javaPath = platform === 'win32' ? 'runtime\\bin\\java.exe' : 'runtime/bin/java';
+  }
+
+  /* -------- Server jar -------- */
+  if (cfg.software === 'custom') {
+    if (cfg.customJarUrl) {
+      steps.push({ op: 'download', url: cfg.customJarUrl, dest: 'server.jar' });
+    }
+    // else: the jar is uploaded to server.jar separately by the UI.
+    supportsPlugins = !proxy;
+  } else {
+    const provider = softwareProviders[cfg.software];
+    if (!provider) throw new Error(`Unsupported software: ${cfg.software}`);
+    const jar = await provider.resolveJar(cfg.version);
+    supportsPlugins = provider.supportsPlugins;
+    steps.push({ op: 'download', url: jar.url, dest: 'server.jar', ...(jar.sha256 ? { sha256: jar.sha256 } : {}) });
+  }
+
+  /* -------- Server files (not for proxies) -------- */
+  if (!proxy) {
+    steps.push(
+      {
+        op: 'write',
+        path: 'eula.txt',
+        content: cfg.eulaAccepted
+          ? '# Accepted by the server owner via ChickenPanel\neula=true\n'
+          : '# You must accept the Minecraft EULA (https://aka.ms/MinecraftEULA)\neula=false\n',
+        base64: false,
+      },
+      { op: 'write', path: 'server.properties', content: buildServerProperties(cfg, port, name), base64: false },
+    );
+  }
+  if (supportsPlugins) steps.push({ op: 'mkdir', path: 'plugins' });
+
+  const effectiveConfig: MinecraftConfig = { ...cfg, javaPath: runtime.hasJava ? undefined : javaPath, isProxy: proxy };
 
   return {
     spec: {
       name,
       type: 'minecraft',
-      startCommand: buildStartCommand(cfg),
-      stopMethod: { type: 'stdin', command: 'stop' },
+      startCommand: buildStartCommand(effectiveConfig),
+      stopMethod: proxy ? { type: 'stdin', command: 'end' } : { type: 'stdin', command: 'stop' },
       stopGraceSeconds: 60,
       env,
       restartPolicy,
@@ -111,6 +183,7 @@ export async function buildMinecraftProvisioning(
     },
     steps,
     port,
+    effectiveConfig,
   };
 }
 
