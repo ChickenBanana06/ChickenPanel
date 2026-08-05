@@ -59,7 +59,7 @@ If you prefer a manual setup, or if the one-line bootstrap fails, follow these s
    node apps/cli/dist/index.js start
    ```
 6. **Access the Web Panel**
-   - Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+   - Open **`http://<your-server-ip>:3000`** in your browser (or `http://localhost:3000` if installing on your local computer).
    - Register your administrator account (the first registered account automatically becomes the administrator).
 
 ---
