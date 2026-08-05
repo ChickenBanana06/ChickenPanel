@@ -91,8 +91,34 @@ If Node.js is not yet installed on your system, install it using the appropriate
    node apps/cli/dist/index.js start
    ```
 6. **Access the Web Panel**
-   - Open **`http://<your-server-ip>:3000`** in your browser (or `http://localhost:3000` if installing on your local computer).
-   - Register your administrator account (the first registered account automatically becomes the administrator).
+    - Open **`http://<your-server-ip>:3000`** in your browser (or `http://localhost:3000` if installing on your local computer).
+    - Register your administrator account (the first registered account automatically becomes the administrator).
+
+> [!WARNING]
+> **Avoid running the panel or database as the `root` user.** PostgreSQL's database engine strictly blocks execution by the `root` user for security reasons. If you run the commands as root, the database will fail to start. See the **Running as Root Troubleshooting** instructions below to resolve this.
+
+##### ⚠️ Running as Root (Troubleshooting)
+If you ran the auto-installer or cloned the files while logged in as `root` (e.g. into `/root/chickenpanel`), follow these steps to migrate the installation to a safe, unprivileged user:
+
+1. **Create an unprivileged system user** (e.g., `chickenpanel`):
+   ```bash
+   adduser chickenpanel
+   ```
+2. **Move the repository to the user's home folder and assign correct permissions**:
+   ```bash
+   mv /root/chickenpanel /home/chickenpanel/
+   chown -R chickenpanel:chickenpanel /home/chickenpanel/chickenpanel
+   ```
+3. **Switch to the new user account**:
+   ```bash
+   su - chickenpanel
+   ```
+4. **Change directory to the project folder and start the panel**:
+   ```bash
+   cd ~/chickenpanel
+   node apps/cli/dist/index.js install
+   node apps/cli/dist/index.js start
+   ```
 
 ---
 
