@@ -70,6 +70,8 @@ const SERVICES: Record<ServiceName, ServiceDef> = {
       process.execPath,
       path.join(repoRoot, 'apps', 'web', 'node_modules', 'next', 'dist', 'bin', 'next'),
       'start',
+      '-H',
+      '0.0.0.0',
       '-p',
       process.env.NEXPANEL_WEB_PORT ?? '3000',
     ],

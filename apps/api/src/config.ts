@@ -53,7 +53,7 @@ export function loadConfig(): ApiConfig {
   const dataDir = defaultDataDir();
   fs.mkdirSync(dataDir, { recursive: true });
   return {
-    host: process.env.NEXPANEL_API_HOST ?? '127.0.0.1',
+    host: process.env.NEXPANEL_API_HOST ?? '0.0.0.0',
     port: Number(process.env.NEXPANEL_API_PORT ?? 4000),
     secret: loadSecret(dataDir),
     dataDir,
