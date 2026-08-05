@@ -3,7 +3,7 @@
 Honest list of what is not finished. The architecture for each item exists; none of these are silently faked in the UI.
 
 ## Application types
-- **Managed databases** (postgres/mysql/redis with auto-credentials, connection info, engine downloads) — Phase 5. The runtime, port allocator and backup system they will use are done; the panel currently says so instead of pretending.
+- **Managed databases** — implemented. Creating a database generates a password, allocates a port, and shows connection info (Connection tab). **Redis** works out of the box (downloads a standalone Redis on Windows; uses `redis-server` from PATH on Linux). **PostgreSQL** and **MySQL/MariaDB** provision and run only if the engine binaries (`initdb`/`postgres`, `mysqld`) are present on the node — there is no automatic engine download for them yet, so on a bare node their provisioning step fails with a clear message.
 - **Website hosting** covers static sites and Node/Next apps (via `node` type). Custom domains / reverse proxy / automatic HTTPS are not implemented (Domain table + ports architecture exist).
 - **Minecraft**: Vanilla + Paper are implemented and tested. Purpur/Fabric/Forge/NeoForge need additional `SoftwareProvider` implementations in `extensions/minecraft/src/catalog.ts`. TPS/player-count querying (via RCON/query protocol) is not implemented; console + logs are.
 

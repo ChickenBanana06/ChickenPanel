@@ -48,11 +48,15 @@ export class Provisioner {
           onProgress(`${label} extracting ${step.archive}`);
           const archive = this.sandbox.resolve(appId, step.archive);
           const dest = this.sandbox.resolve(appId, step.dest);
-          if (!/\.(tgz|tar\.gz|tar)$/i.test(step.archive)) {
-            throw new Error('Only .tar/.tar.gz/.tgz archives are supported currently');
-          }
           await fs.mkdir(dest, { recursive: true });
-          await tar.x({ file: archive, cwd: dest });
+          if (/\.zip$/i.test(step.archive)) {
+            const AdmZip = (await import('adm-zip')).default;
+            new AdmZip(archive).extractAllTo(dest, true);
+          } else if (/\.(tgz|tar\.gz|tar)$/i.test(step.archive)) {
+            await tar.x({ file: archive, cwd: dest });
+          } else {
+            throw new Error('Only .tar/.tar.gz/.tgz/.zip archives are supported');
+          }
           break;
         }
         case 'exec': {

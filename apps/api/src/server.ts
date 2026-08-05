@@ -19,6 +19,7 @@ import { BackupService } from './services/backup-service.js';
 import { registerCoreTools } from './services/tools/core-tools.js';
 import { builtinExtensions } from './extensions/builtin.js';
 import { minecraftExtension } from './extensions/minecraft.js';
+import { databaseExtensions } from './extensions/database.js';
 import { authRoutes } from './routes/auth.js';
 import { nodeRoutes, agentWsRoute } from './routes/nodes.js';
 import { appRoutes } from './routes/apps.js';
@@ -49,6 +50,7 @@ export async function buildServer(config: ApiConfig): Promise<BuiltServer> {
 
   for (const ext of builtinExtensions) extensions.register(ext);
   extensions.register(minecraftExtension);
+  for (const ext of databaseExtensions) extensions.register(ext);
 
   const app = Fastify({
     logger: { level: process.env.NEXPANEL_LOG_LEVEL ?? 'info' },

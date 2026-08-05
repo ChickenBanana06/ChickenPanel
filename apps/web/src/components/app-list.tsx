@@ -114,6 +114,9 @@ export function CreateAppModal({
   const [mcSim, setMcSim] = useState(10);
   const [mcAutoStart, setMcAutoStart] = useState(true);
   const [mcEula, setMcEula] = useState(false);
+  // database config
+  const [dbMemory, setDbMemory] = useState(0);
+  const [dbName, setDbName] = useState('appdb');
 
   const effectiveType = type || types[0]?.type || '';
   const effectiveNode = nodeId || nodes[0]?.id || '';
@@ -140,6 +143,12 @@ export function CreateAppModal({
           viewDistance: mcView, simulationDistance: mcSim, autoStart: mcAutoStart,
           eulaAccepted: mcEula,
         };
+      } else if (effectiveType === 'redis') {
+        if (dbMemory) config.maxMemoryMb = dbMemory;
+      } else if (effectiveType === 'postgres') {
+        config.database = dbName || 'appdb';
+      } else if (effectiveType === 'mysql') {
+        config = {};
       } else {
         if (startCommand) config.startCommand = startCommand;
         if (installCommand) config.installCommand = installCommand;
@@ -235,6 +244,26 @@ export function CreateAppModal({
                 . The server will not start without accepting it.
               </span>
             </label>
+          </div>
+        ) : ['redis', 'postgres', 'mysql'].includes(effectiveType) ? (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-edge bg-raised/40 p-3 text-xs text-dim">
+              A secure password is generated automatically. After it starts, open the database and see the{' '}
+              <span className="text-ink">Connection</span> tab for credentials and the connection string.
+              {effectiveType === 'redis' && ' Redis downloads a standalone server on Windows automatically.'}
+              {effectiveType === 'postgres' && ' PostgreSQL requires the postgres/initdb binaries on the node.'}
+              {effectiveType === 'mysql' && ' MySQL/MariaDB requires the mysqld binary on the node.'}
+            </div>
+            {effectiveType === 'redis' && (
+              <Field label="Max memory in MB (optional, 0 = unlimited)">
+                <Input type="number" min={0} value={dbMemory} onChange={(e) => setDbMemory(Number(e.target.value))} />
+              </Field>
+            )}
+            {effectiveType === 'postgres' && (
+              <Field label="Database name">
+                <Input value={dbName} onChange={(e) => setDbName(e.target.value)} placeholder="appdb" />
+              </Field>
+            )}
           </div>
         ) : (
           <div className="space-y-3">

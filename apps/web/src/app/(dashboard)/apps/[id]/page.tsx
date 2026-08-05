@@ -1,9 +1,9 @@
 'use client';
 
-import { use, useEffect, useRef, useState } from 'react';
+import { use, useEffect, useRef, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import { Play, Square, RotateCw, Skull, Trash2, Folder, FileText, ArrowLeft, Download, FolderPlus, Pencil } from 'lucide-react';
+import { Play, Square, RotateCw, Skull, Trash2, Folder, FileText, ArrowLeft, Download, FolderPlus, Pencil, Copy, Eye, EyeOff } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
 import { Button, Card, EmptyState, Field, Input, Modal, Spinner, StatusBadge, cx, useToast, ProgressBar } from '@/components/ui';
@@ -22,8 +22,17 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
   const toast = useToast();
   const { data, mutate } = useSWR<{ application: AppDetail }>(`/apps/${id}`, fetcher);
   const app = data?.application;
-  const [tab, setTab] = useState<'console' | 'files' | 'settings' | 'backups'>('console');
+  const [tab, setTab] = useState<'console' | 'files' | 'settings' | 'backups' | 'connection'>('console');
   const [busy, setBusy] = useState<string | null>(null);
+  const isDatabase = ['redis', 'postgres', 'mysql'].includes(app?.type ?? '');
+  const didInitTab = useRef(false);
+
+  useEffect(() => {
+    if (app && isDatabase && !didInitTab.current) {
+      didInitTab.current = true;
+      setTab('connection');
+    }
+  }, [app, isDatabase]);
 
   useRealtimeTopic(`app:${id}`, (evt) => {
     if (evt.event === 'status' || evt.event === 'metrics') void mutate();
@@ -97,7 +106,13 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div className="flex gap-1 border-b border-edge">
-        {(['console', 'files', 'settings', 'backups'] as const).map((t) => (
+        {([...(isDatabase ? ['connection'] : []), 'console', 'files', 'settings', 'backups'] as (
+          | 'console'
+          | 'files'
+          | 'settings'
+          | 'backups'
+          | 'connection'
+        )[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -111,6 +126,7 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
         ))}
       </div>
 
+      {tab === 'connection' && <ConnectionTab app={app} />}
       {tab === 'console' && (
         <ConsoleTab appId={id} running={app.status === 'running'} isMinecraft={app.type === 'minecraft'} />
       )}
@@ -125,6 +141,80 @@ function formatUptime(s: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m up`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m up`;
   return `${Math.floor(s / 86400)}d up`;
+}
+
+/* ---------------- Connection (databases) ---------------- */
+
+interface ConnectionInfo {
+  engine: string; host: string; port: number;
+  username: string | null; password: string; database: string | null; uri: string;
+}
+
+function ConnectionTab({ app }: { app: AppDetail }) {
+  const toast = useToast();
+  const [reveal, setReveal] = useState(false);
+  const conn = (app.config?.connection ?? null) as ConnectionInfo | null;
+
+  if (!conn) {
+    return (
+      <Card className="p-4">
+        <EmptyState title="No connection info" hint="This database has not finished provisioning yet." />
+      </Card>
+    );
+  }
+
+  // The stored host is node-local; show the browser host as a convenience and
+  // build a ready-to-use URI with the real password substituted.
+  const host = typeof window !== 'undefined' ? window.location.hostname : conn.host;
+  const uri = conn.uri.replace('HOST', host);
+  const copy = (v: string) => { void navigator.clipboard.writeText(v); toast('success', 'Copied'); };
+
+  const rows: [string, string, boolean?][] = [
+    ['Engine', conn.engine],
+    ['Host', host],
+    ['Port', String(conn.port)],
+    ...(conn.username ? [['Username', conn.username] as [string, string]] : []),
+    ...(conn.database ? [['Database', conn.database] as [string, string]] : []),
+    ['Password', reveal ? conn.password : '•'.repeat(16), true],
+  ];
+
+  return (
+    <Card className="p-4 space-y-4 max-w-2xl">
+      <div className="grid grid-cols-[110px_1fr_auto] gap-x-3 gap-y-2 items-center text-sm">
+        {rows.map(([label, value, secret]) => (
+          <Fragment key={label}>
+            <span className="text-dim text-xs">{label}</span>
+            <span className={cx('console-font truncate', secret && !reveal && 'tracking-widest')}>{value}</span>
+            <span className="flex gap-1.5">
+              {secret && (
+                <button className="text-dim hover:text-ink" onClick={() => setReveal((r) => !r)} title={reveal ? 'Hide' : 'Reveal'}>
+                  {reveal ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+              )}
+              <button className="text-dim hover:text-ink" onClick={() => copy(label === 'Password' ? conn.password : value)} title="Copy">
+                <Copy size={13} />
+              </button>
+            </span>
+          </Fragment>
+        ))}
+      </div>
+
+      <div>
+        <div className="text-xs text-dim mb-1">Connection URI</div>
+        <div className="flex gap-2">
+          <code className="console-font text-xs bg-bg border border-edge rounded-lg px-3 py-2 flex-1 overflow-x-auto whitespace-nowrap">
+            {reveal ? uri : uri.replace(conn.password, '••••••••')}
+          </code>
+          <Button size="sm" onClick={() => copy(uri)}><Copy size={13} /></Button>
+        </div>
+      </div>
+
+      <p className="text-xs text-faint">
+        Passwords are generated automatically and stored encrypted with the panel. The host shown is for connecting from
+        this machine — from elsewhere on your network use the node&apos;s IP address, and make sure the port is reachable.
+      </p>
+    </Card>
+  );
 }
 
 /* ---------------- Console ---------------- */
