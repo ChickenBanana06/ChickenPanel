@@ -147,16 +147,34 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext): Promise
 
   app.patch('/:id', { preHandler: requirePermission('users.manage') }, async (req) => {
     const { id } = req.params as { id: string };
-    const body = req.body as { role?: string; grantedPermissions?: string[]; revokedPermissions?: string[] };
+    const body = req.body as {
+      role?: string;
+      grantedPermissions?: string[];
+      revokedPermissions?: string[];
+      password?: string;
+    };
     if (body.role && !['ADMIN', 'USER', 'VIEWER'].includes(body.role)) throw ApiError.badRequest('Invalid role');
+    let passwordHash: string | undefined;
+    if (body.password !== undefined) {
+      if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 256) {
+        throw ApiError.badRequest('Password must be at least 8 characters');
+      }
+      const { hashPassword } = await import('../lib/passwords.js');
+      passwordHash = await hashPassword(body.password);
+    }
     const user = await ctx.db.user.update({
       where: { id },
       data: {
         ...(body.role ? { role: body.role as never } : {}),
         ...(body.grantedPermissions ? { grantedPermissions: body.grantedPermissions } : {}),
         ...(body.revokedPermissions ? { revokedPermissions: body.revokedPermissions } : {}),
+        ...(passwordHash ? { passwordHash } : {}),
       },
     });
+    if (passwordHash) {
+      // Password reset by an admin signs the target user out everywhere.
+      await ctx.db.session.deleteMany({ where: { userId: id } });
+    }
     await writeAudit(ctx.db, {
       actor: 'user', userId: req.authedUser!.id, action: 'user.update',
       targetType: 'user', targetId: id, args: body, success: true, ip: req.ip,

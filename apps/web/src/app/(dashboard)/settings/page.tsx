@@ -2,14 +2,14 @@
 
 import { useState } from 'react';
 import useSWR from 'swr';
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { Plus, Trash2, Pencil, KeyRound } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Button, Card, EmptyState, Field, Input, Modal, Select, cx, useToast } from '@/components/ui';
 
 export default function SettingsPage() {
   const { can } = useAuth();
-  const [tab, setTab] = useState<'ai' | 'users' | 'audit'>('ai');
+  const [tab, setTab] = useState<'ai' | 'users' | 'audit' | 'account'>('ai');
   return (
     <div className="space-y-4 max-w-4xl">
       <h1 className="text-lg font-semibold">Settings</h1>
@@ -18,6 +18,7 @@ export default function SettingsPage() {
           ['ai', 'AI Providers'],
           ['users', 'Users'],
           ['audit', 'Audit log'],
+          ['account', 'Account'],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -34,7 +35,55 @@ export default function SettingsPage() {
       {tab === 'ai' && <AIProviders canConfigure={can('ai.configure')} />}
       {tab === 'users' && (can('users.manage') ? <Users /> : <p className="text-sm text-dim">Requires users.manage permission.</p>)}
       {tab === 'audit' && (can('audit.read') ? <AuditLog /> : <p className="text-sm text-dim">Requires audit.read permission.</p>)}
+      {tab === 'account' && <Account />}
     </div>
+  );
+}
+
+/* ---------------- Account (change own password) ---------------- */
+
+function Account() {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <Card className="p-4 max-w-sm space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold">Change password</h3>
+        <p className="text-xs text-faint mt-0.5">Signed in as {user?.username}. Other sessions are signed out after a change.</p>
+      </div>
+      <Field label="Current password">
+        <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+      </Field>
+      <Field label="New password (min 8 characters)">
+        <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+      </Field>
+      <Field label="Confirm new password">
+        <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+      </Field>
+      {confirm.length > 0 && confirm !== next && <p className="text-xs text-bad">Passwords do not match.</p>}
+      <Button
+        variant="primary"
+        disabled={busy || !current || next.length < 8 || next !== confirm}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api('POST', '/auth/change-password', { currentPassword: current, newPassword: next });
+            toast('success', 'Password changed');
+            setCurrent(''); setNext(''); setConfirm('');
+          } catch (err) {
+            toast('error', err instanceof Error ? err.message : 'Change failed');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Change password
+      </Button>
+    </Card>
   );
 }
 
@@ -306,9 +355,30 @@ function Users() {
                   <option>VIEWER</option>
                 </Select>
               </td>
-              <td className="py-2.5 text-right">
+              <td className="py-2.5 text-right space-x-2">
+                <button
+                  className="text-dim hover:text-ink"
+                  title="Reset password"
+                  onClick={async () => {
+                    const pw = window.prompt(`New password for ${u.username} (min 8 characters):`);
+                    if (!pw) return;
+                    if (pw.length < 8) {
+                      toast('error', 'Password must be at least 8 characters');
+                      return;
+                    }
+                    try {
+                      await api('PATCH', `/users/${u.id}`, { password: pw });
+                      toast('success', `Password reset for ${u.username} — they are signed out everywhere`);
+                    } catch (err) {
+                      toast('error', err instanceof Error ? err.message : 'Reset failed');
+                    }
+                  }}
+                >
+                  <KeyRound size={13} />
+                </button>
                 <button
                   className="text-dim hover:text-bad"
+                  title="Delete user"
                   onClick={async () => {
                     if (!window.confirm(`Delete user ${u.username}?`)) return;
                     try {

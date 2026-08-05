@@ -85,6 +85,29 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext): Promise
     return { user: { id: user.id, username: user.username, email: user.email, role: user.role } };
   });
 
+  /** Change your own password. Verifies the current one and signs out other sessions. */
+  app.post('/change-password', { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
+    const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
+    if (!currentPassword || !newPassword) throw ApiError.badRequest('currentPassword and newPassword required');
+    if (newPassword.length < 8 || newPassword.length > 256) {
+      throw ApiError.badRequest('New password must be at least 8 characters');
+    }
+    const authed = req.authedUser!;
+    const user = await ctx.db.user.findUnique({ where: { id: authed.id } });
+    if (!user || !(await verifyPassword(currentPassword, user.passwordHash))) {
+      await writeAudit(ctx.db, {
+        actor: 'user', userId: authed.id, action: 'auth.change_password',
+        success: false, error: 'wrong current password', ip: req.ip,
+      });
+      throw ApiError.unauthorized('Current password is incorrect');
+    }
+    await ctx.db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(newPassword) } });
+    // Sign out every other session for this account.
+    await ctx.db.session.deleteMany({ where: { userId: user.id, id: { not: authed.sessionId } } });
+    await writeAudit(ctx.db, { actor: 'user', userId: user.id, action: 'auth.change_password', success: true, ip: req.ip });
+    return { ok: true };
+  });
+
   app.post('/logout', { preHandler: requireAuth }, async (req, reply) => {
     const user = req.authedUser!;
     await ctx.db.session.delete({ where: { id: user.sessionId } }).catch(() => undefined);
