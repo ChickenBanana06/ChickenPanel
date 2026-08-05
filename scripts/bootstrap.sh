@@ -1,13 +1,13 @@
 #!/usr/bin/env sh
 # ChickenPanel one-line installer (Linux / macOS)
 #
-#   curl -fsSL https://raw.githubusercontent.com/ChickenBanana06/chickenpanel/main/scripts/bootstrap.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/ChickenBanana06/ChickenPanel/main/scripts/bootstrap.sh | sh
 #
 # Clones (or updates) ChickenPanel and builds it. Then start the panel, or
 # connect this machine as a node. Safe to re-run.
 set -eu
 
-REPO="${CHICKENPANEL_REPO:-ChickenBanana06/chickenpanel}"
+REPO="${CHICKENPANEL_REPO:-ChickenBanana06/ChickenPanel}"
 BRANCH="${CHICKENPANEL_BRANCH:-main}"
 DIR="${CHICKENPANEL_DIR:-$HOME/chickenpanel}"
 

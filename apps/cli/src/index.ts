@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * nexpanel — control CLI for the NexPanel platform.
+ * chickenpanel — control CLI for the ChickenPanel platform.
  *
  * Commands:
- *   nexpanel install          Prepare the local installation (db init + migrations)
- *   nexpanel start [service]  Start services (db, api, web, agent — default: db,api,web)
- *   nexpanel stop  [service]  Stop services
- *   nexpanel restart          Restart services
- *   nexpanel status           Show service status
- *   nexpanel logs <service>   Tail a service log file
- *   nexpanel update           Rebuild after a git pull
- *   nexpanel node register    Configure the local Node Agent with a panel URL + token
+ *   chickenpanel install          Prepare the local installation (db init + migrations)
+ *   chickenpanel start [service]  Start services (db, api, web, agent — default: db,api,web)
+ *   chickenpanel stop  [service]  Stop services
+ *   chickenpanel restart          Restart services
+ *   chickenpanel status           Show service status
+ *   chickenpanel logs <service>   Tail a service log file
+ *   chickenpanel update           Rebuild after a git pull
+ *   chickenpanel node register    Configure the local Node Agent with a panel URL + token
  */
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -200,7 +200,7 @@ switch (command) {
       env: { ...process.env, DATABASE_URL: DB_URL },
       shell: process.platform === 'win32',
     });
-    console.log('Install complete. Run "nexpanel start" next.');
+    console.log('Install complete. Run "chickenpanel start" next.');
     break;
   }
   case 'start': {
@@ -254,17 +254,17 @@ switch (command) {
       cwd: repoRoot, stdio: 'inherit', shell: process.platform === 'win32',
       env: { ...process.env, DATABASE_URL: DB_URL },
     });
-    console.log('Update complete. Restart services with "nexpanel restart".');
+    console.log('Update complete. Restart services with "chickenpanel restart".');
     break;
   }
   case 'node': {
     if (arg1 !== 'register') {
-      console.error('Usage: nexpanel node register <panel-url> <token>');
+      console.error('Usage: chickenpanel node register <panel-url> <token>');
       process.exit(1);
     }
     const [, , , , panelUrl, token] = process.argv;
     if (!panelUrl || !token) {
-      console.error('Usage: nexpanel node register <panel-url> <token>');
+      console.error('Usage: chickenpanel node register <panel-url> <token>');
       process.exit(1);
     }
     const agentData =
@@ -275,7 +275,7 @@ switch (command) {
     fs.mkdirSync(agentData, { recursive: true });
     fs.writeFileSync(path.join(agentData, 'agent.json'), JSON.stringify({ panelUrl, token }, null, 2), { mode: 0o600 });
     console.log(`Agent configured (${path.join(agentData, 'agent.json')}).`);
-    console.log('Start it with: nexpanel start agent');
+    console.log('Start it with: chickenpanel start agent');
     break;
   }
   default:

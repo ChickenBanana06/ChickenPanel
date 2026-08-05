@@ -1,55 +1,136 @@
 # ChickenPanel 🐤
 
-AI-powered, cross-platform server management platform. Install it on your own machine or VPS and manage Minecraft servers, Discord bots, websites, databases, files, backups and multiple nodes from a web panel with a built-in AI operator.
+AI-powered, cross-platform server management platform. Install it on your own machine or VPS and manage Minecraft servers, Discord bots, websites, databases, files, backups, and multiple nodes from a clean web panel with a built-in AI operator.
 
-Works on **Windows** and **Linux**. macOS mostly works via the POSIX platform layer but is not officially supported yet.
+Works on **Windows** and **Linux**. macOS works via the POSIX platform layer (unsupported but functional).
 
-> The CLI is `chickenpanel` (the older `nexpanel` alias still works). Internal package names (`@nexpanel/*`), environment variables (`NEXPANEL_*`) and data directories keep their original identifiers for compatibility.
+> The CLI is `chickenpanel` (the older `nexpanel` alias still works). Internal package names (`@nexpanel/*`), environment variables (`NEXPANEL_*`), and data directories keep their original identifiers for compatibility.
 
-## Quick start
+***
 
-Requirements: **Node.js 20+** and **git** (Java 21+ for Minecraft, but the panel auto-downloads a JRE when missing).
+## 🚀 One-Line Auto Install
 
-### One-line install (from GitHub)
+Simply run the command below on your machine. The script will automatically clone the repository, install dependencies (like `pnpm`), build the platform, and set up global command shims.
 
+### Linux / macOS
 ```bash
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/ChickenBanana06/chickenpanel/main/scripts/bootstrap.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ChickenBanana06/ChickenPanel/main/scripts/bootstrap.sh | sh
 ```
 
+### Windows (Run in PowerShell as Administrator)
 ```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/ChickenBanana06/chickenpanel/main/scripts/bootstrap.ps1 | iex
+irm https://raw.githubusercontent.com/ChickenBanana06/ChickenPanel/main/scripts/bootstrap.ps1 | iex
 ```
 
-This clones the repo, installs dependencies and builds. Then `chickenpanel install` (first run) and `chickenpanel start`. To connect the machine as a **node** instead, run `chickenpanel node register http://PANEL_IP:4000 TOKEN` then `chickenpanel start agent`.
+***
 
-### From a local clone
+## 🛠️ Step-by-Step Guides
 
-```bash
-# Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+### 1. Installation Guide
 
-# Linux
-sh scripts/install.sh
-```
+If you prefer a manual setup, or if the one-line bootstrap fails, follow these steps:
 
-Then:
+#### Requirements
+- **Node.js 20+**
+- **Git**
+- **pnpm 10+** (Install via `npm install -g pnpm@10`)
+- **Java 21+** (Optional; required for Minecraft servers. The panel will auto-download a JRE if missing.)
 
-```bash
-node apps/cli/dist/index.js start        # starts db + api + web
-```
+#### Manual Setup Steps
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/ChickenBanana06/ChickenPanel.git
+   cd ChickenPanel
+   ```
+2. **Install Dependencies**
+   ```bash
+   pnpm install
+   ```
+3. **Build the Project**
+   ```bash
+   pnpm -r --workspace-concurrency=1 build
+   ```
+4. **Initialize the Database (First-time setup)**
+   ```bash
+   node apps/cli/dist/index.js install
+   ```
+5. **Start the Control Panel Services (Embedded Database + API + Web UI)**
+   ```bash
+   node apps/cli/dist/index.js start
+   ```
+6. **Access the Web Panel**
+   - Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+   - Register your administrator account (the first registered account automatically becomes the administrator).
 
-Open **http://localhost:3000** — the first account you register becomes the administrator.
+---
 
-To host applications on this machine, add a node in the panel (Nodes → Add node), then:
+### 2. How to Link Nodes
 
-```bash
-node apps/cli/dist/index.js node register http://localhost:4000 <token>
-node apps/cli/dist/index.js start agent
-```
+A **Node** represents any physical machine or VPS where you want to run servers, databases, or applications. You can link multiple nodes to a single central control panel.
 
-## Development
+#### Step 1: Add Node in the Panel
+1. Open the ChickenPanel Web UI.
+2. Navigate to **Nodes** in the sidebar.
+3. Click **Add Node**.
+4. Give your Node a **Name** (e.g., `vps-chicago-1`) and description, then click **Create**.
+5. The panel will display a **Registration Command** containing a URL and a secure node token. Copy this command.
+
+#### Step 2: Register the Node Agent
+1. Log in to the terminal of the target machine/node.
+2. Install ChickenPanel on the node using the installation steps above.
+3. Run the registration command (replace `<url>` and `<token>` with your panel's values):
+   ```bash
+   # If global command is installed:
+   chickenpanel node register <url> <token>
+   
+   # Or using the direct path:
+   node apps/cli/dist/index.js node register <url> <token>
+   ```
+4. This creates a secure configuration at `<agent-data-dir>/agent.json`.
+
+#### Step 3: Start the Node Agent
+1. Start the agent process so it can communicate with the control plane:
+   ```bash
+   # If global command is installed:
+   chickenpanel start agent
+   
+   # Or using the direct path:
+   node apps/cli/dist/index.js start agent
+   ```
+2. Return to the Central Panel UI. The Node status will change to **ONLINE** 🟢, and you can now deploy servers to it.
+
+---
+
+### 3. How to Setup Servers & Apps
+
+Once a node is linked and online, you can deploy applications (Minecraft servers, Discord bots, Python apps, static sites, databases, etc.) in a few clicks.
+
+#### Step 1: Create the Application
+1. Go to the **Applications** page in the sidebar and click **Create Application**.
+2. **Select Node**: Choose the online node where you want this server to run.
+3. **Application Type**: Select from the catalog (e.g., `minecraft`, `node`, `python`, `postgres`, `redis`, `discord-bot`, `custom`).
+4. **Configuration**:
+   - For **Minecraft**: Select the software (Vanilla, Paper, Purpur, etc.) and version.
+   - Configure **Memory limits** (RAM) and **Ports**.
+   - Input **Environment variables** if needed.
+5. Click **Create**.
+
+#### Step 2: Provisioning & Auto-Downloads
+- Creating a server triggers a **Background Provisioning Task** on the node.
+- The node agent will automatically create directories, download the required server binaries/JARs (e.g., fetching Mojang/Paper APIs), download a Java Runtime (JRE 21) if the node lacks it, and verify hashes.
+- You can monitor progress live in the **Task System** or the sidebar tasks window.
+
+#### Step 3: Run and Control
+1. Once the status changes to `stopped`, navigate to the application's page.
+2. Click **Start** to boot the server.
+3. Use the **Console** tab to read live log output and send stdin command lines (e.g., Minecraft console commands).
+4. Use the built-in **AI Operator** to ask questions, edit configuration files, execute tasks, or automate backups.
+
+***
+
+## 💻 Development & Contributions
+
+If you want to contribute or run in hot-reload mode:
 
 ```bash
 pnpm install
@@ -57,83 +138,23 @@ pnpm -r --workspace-concurrency=1 build   # build everything
 pnpm --filter @nexpanel/database dev      # terminal 1: embedded PostgreSQL (port 5490)
 pnpm dev:api                              # terminal 2: API with hot reload (port 4000)
 pnpm dev:web                              # terminal 3: Next.js dev server (port 3000)
-pnpm dev:agent                            # terminal 4: node agent (needs NEXPANEL_URL + NEXPANEL_NODE_TOKEN)
+pnpm dev:agent                            # terminal 4: node agent (requires env config)
 ```
 
-Tests and checks:
-
+### Run Tests
 ```bash
 pnpm -r typecheck
 pnpm --filter @nexpanel/shared build && node --test packages/shared/dist/*.test.js
 cd apps/api && pnpm exec tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js
 node --test agent/dist/*.test.js
-node scripts/e2e-smoke.mjs --with-agent   # full end-to-end (needs api + agent running)
+node scripts/e2e-smoke.mjs --with-agent   # end-to-end smoke test
 ```
 
-## CLI
+***
 
-```
-nexpanel install               Initialize database + run migrations
-nexpanel start [svc[,svc]]     Start services (default: db,api,web)
-nexpanel stop [svc[,svc]]      Stop services
-nexpanel restart [svc[,svc]]   Restart services
-nexpanel status                Show service status
-nexpanel logs <svc>            Show recent logs (db|api|web|agent)
-nexpanel update                Reinstall deps, rebuild, migrate
-nexpanel node register <url> <token>   Configure the local Node Agent
-```
+## 🔒 Security Summary
 
-(`nexpanel` = `node apps/cli/dist/index.js`; alias or symlink it for convenience.)
-
-## Environment variables
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DATABASE_URL` | `postgresql://nexpanel:nexpanel@127.0.0.1:5490/nexpanel` | PostgreSQL connection. Point at your own server in production. |
-| `NEXPANEL_SECRET` | auto-generated in data dir | Master secret: session cookies + AES-256-GCM encryption of stored AI keys. **Set explicitly in production.** |
-| `NEXPANEL_DATA_DIR` | `%LOCALAPPDATA%\nexpanel` / `~/.local/share/nexpanel` | Control-plane data directory. |
-| `NEXPANEL_API_HOST` / `NEXPANEL_API_PORT` | `127.0.0.1` / `4000` | API bind address. |
-| `NEXPANEL_WEB_PORT` | `3000` | Web UI port. |
-| `NEXPANEL_TRUST_PROXY` | `false` | Set `true` behind a reverse proxy. |
-| `NEXPANEL_URL` | — | (Agent) control-plane URL. |
-| `NEXPANEL_NODE_TOKEN` | — | (Agent) node registration token. |
-| `NEXPANEL_AGENT_DATA` | `…\nexpanel-agent` | (Agent) data dir: apps, workspaces, backups. |
-| `NEXT_PUBLIC_API_PORT` | `4000` | (Web) API port for the realtime WebSocket. |
-
-## AI providers
-
-Settings → AI Providers → Add provider. Supported: **Anthropic**, **OpenAI**, **Google (Gemini)** and any **OpenAI-compatible** endpoint (Ollama, vLLM, OpenRouter — set the base URL, e.g. `http://localhost:11434/v1`).
-
-API keys are AES-256-GCM encrypted at rest, masked in the UI, never sent to the browser after configuration and never written to logs or audit entries. Model lists are fetched live from the provider.
-
-The AI operates through ~25 controlled tools (files, terminal, servers, backups, workspaces). **Permissions are enforced by the backend per tool call** — dangerous actions (deletes, shell commands, restores) pause the run until you approve them in the chat. Every AI action is written to the audit log.
-
-## Database migrations
-
-```bash
-# dev (creates migration files)
-$env:DATABASE_URL='postgresql://nexpanel:nexpanel@127.0.0.1:5490/nexpanel'
-pnpm --filter @nexpanel/database migrate:dev
-
-# production (applies committed migrations)
-pnpm --filter @nexpanel/database migrate:deploy
-```
-
-## Documentation
-
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system design, agent protocol, extension system, AI agent loop
-- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — current limitations and planned work
-
-## Repository layout
-
-```
-apps/api          Fastify control plane (auth, nodes, apps, AI, tasks, WS)
-apps/web          Next.js dark-mode dashboard with AI sidebar
-apps/cli          nexpanel CLI (service supervisor)
-agent/            Node Agent (runs on every managed machine)
-packages/shared   Types, zod schemas, permissions, agent wire protocol
-packages/database Prisma schema + embedded PostgreSQL bootstrap
-packages/ai       AI gateway (Anthropic / OpenAI-compatible wire protocols)
-extensions/minecraft  Minecraft catalogs + provisioning compiler
-scripts/          Installers, e2e smoke test, mock AI provider
-```
+- Node tokens & session tokens are stored as SHA-256 hashes.
+- Path traversal is strictly blocked at both API and agent layers.
+- AI provider keys are AES-256-GCM encrypted at rest using a panel master secret.
+- Dangerous operations (deletes, restores, shell commands) initiated by the AI require explicit per-call user approval.
