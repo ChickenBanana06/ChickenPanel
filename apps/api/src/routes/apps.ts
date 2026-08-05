@@ -132,12 +132,25 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
 
   app.post('/:id/ports/allocate', { preHandler: requirePermission('server.create') }, async (req) => {
     const { id } = req.params as { id: string };
-    const result = await ctx.apps.allocateExtraPort(id);
+    const { port } = (req.body ?? {}) as { port?: number };
+    const result = await ctx.apps.allocateExtraPort(id, port);
     await writeAudit(ctx.db, {
       actor: 'user', userId: req.authedUser!.id, action: 'app.port.allocate',
-      targetType: 'application', targetId: id, args: result, success: true, ip: req.ip,
+      targetType: 'application', targetId: id, args: { ...result, preferredPort: port }, success: true, ip: req.ip,
     });
     return result;
+  });
+
+  app.delete('/:id/ports/:port', { preHandler: requirePermission('server.create') }, async (req) => {
+    const { id, port: portStr } = req.params as { id: string; port: string };
+    const port = Number(portStr);
+    if (!port || Number.isNaN(port)) throw ApiError.badRequest('Invalid port');
+    await ctx.apps.deletePort(id, port);
+    await writeAudit(ctx.db, {
+      actor: 'user', userId: req.authedUser!.id, action: 'app.port.delete',
+      targetType: 'application', targetId: id, args: { port }, success: true, ip: req.ip,
+    });
+    return { ok: true };
   });
 
   app.delete('/:id', { preHandler: requirePermission('server.delete') }, async (req) => {

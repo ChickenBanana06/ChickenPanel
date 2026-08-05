@@ -157,11 +157,24 @@ export class AppService {
    * the app's port list and exposed as PORT_<n> in its environment (applied
    * on the next restart).
    */
-  async allocateExtraPort(appId: string): Promise<{ port: number; envVar: string }> {
+  async allocateExtraPort(appId: string, preferredPort?: number): Promise<{ port: number; envVar: string }> {
     const app = await this.get(appId);
     if (app.ports.length >= 16) throw ApiError.badRequest('Port limit reached (16 per application)');
-    const [port] = await this.ports.allocate(app.nodeId, 1);
-    if (!port) throw ApiError.conflict('No free port available');
+    
+    let port: number;
+    if (preferredPort !== undefined) {
+      if (preferredPort < 1 || preferredPort > 65535) throw ApiError.badRequest('Invalid port number');
+      const [allocated] = await this.ports.allocate(app.nodeId, 1, [preferredPort]);
+      if (allocated !== preferredPort) {
+        throw ApiError.conflict(`Port ${preferredPort} is already in use or unavailable on this node`);
+      }
+      port = allocated;
+    } else {
+      const [allocated] = await this.ports.allocate(app.nodeId, 1);
+      if (!allocated) throw ApiError.conflict('No free port available');
+      port = allocated;
+    }
+    
     const envVar = `PORT_${app.ports.length + 1}`;
     const env = { ...((app.env as Record<string, string>) ?? {}), [envVar]: String(port) };
     await this.ctx.db.application.update({
@@ -170,6 +183,36 @@ export class AppService {
     });
     this.ctx.realtime.publish('apps', 'app.updated', { appId });
     return { port, envVar };
+  }
+
+  /**
+   * Delete an allocated port from an application, shifting remaining PORT_<n> vars.
+   */
+  async deletePort(appId: string, port: number): Promise<void> {
+    const app = await this.get(appId);
+    if (!app.ports.includes(port)) throw ApiError.notFound('Port not found on this application');
+    if (app.ports[0] === port) throw ApiError.badRequest('Cannot delete the primary application port');
+    
+    const updatedPorts = app.ports.filter((p) => p !== port);
+    const env = { ...((app.env as Record<string, string>) ?? {}) };
+    
+    // Clean up all PORT_<n> environment variables
+    for (const key of Object.keys(env)) {
+      if (/^PORT_\d+$/.test(key)) {
+        delete env[key];
+      }
+    }
+    
+    // Re-add remaining ports sequentially in environment variables
+    updatedPorts.forEach((p, idx) => {
+      env[`PORT_${idx + 1}`] = String(p);
+    });
+    
+    await this.ctx.db.application.update({
+      where: { id: appId },
+      data: { ports: updatedPorts, env: env as Prisma.InputJsonValue },
+    });
+    this.ctx.realtime.publish('apps', 'app.updated', { appId });
   }
 
   async get(appId: string): Promise<Application> {

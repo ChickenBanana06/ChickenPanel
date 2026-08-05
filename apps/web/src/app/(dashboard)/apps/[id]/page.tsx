@@ -627,17 +627,54 @@ function SettingsTab({ app, onSaved }: { app: AppDetail; onSaved: () => void }) 
       <Field label="Ports">
         <div className="flex items-center gap-2 flex-wrap">
           {app.ports.map((p, i) => (
-            <span key={p} className="console-font text-xs bg-raised border border-edge-strong rounded-lg px-2.5 py-1">
+            <span key={p} className="console-font text-xs bg-raised border border-edge-strong rounded-lg px-2.5 py-1 flex items-center gap-1.5">
               {p} <span className="text-faint">({i === 0 ? 'PORT' : `PORT_${i + 1}`})</span>
+              {i > 0 && (
+                <button
+                  disabled={portBusy}
+                  onClick={async () => {
+                    if (!window.confirm(`Delete port ${p} from this application?`)) return;
+                    setPortBusy(true);
+                    try {
+                      await api('DELETE', `/apps/${app.id}/ports/${p}`);
+                      toast('success', `Port ${p} deleted — restart to apply`);
+                      onSaved();
+                    } catch (err) {
+                      toast('error', err instanceof Error ? err.message : 'Delete failed');
+                    } finally {
+                      setPortBusy(false);
+                    }
+                  }}
+                  className="text-dim hover:text-bad ml-1 font-bold cursor-pointer"
+                  title="Delete port"
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
           <Button
             size="sm"
             disabled={portBusy}
             onClick={async () => {
+              const val = window.prompt('Enter preferred port number (leave blank for automatic allocation):');
+              if (val === null) return; // user cancelled
+              let preferredPort: number | undefined;
+              if (val.trim()) {
+                const parsed = Number(val.trim());
+                if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+                  toast('error', 'Invalid port number');
+                  return;
+                }
+                preferredPort = parsed;
+              }
               setPortBusy(true);
               try {
-                const res = await api<{ port: number; envVar: string }>('POST', `/apps/${app.id}/ports/allocate`);
+                const res = await api<{ port: number; envVar: string }>(
+                  'POST',
+                  `/apps/${app.id}/ports/allocate`,
+                  preferredPort !== undefined ? { port: preferredPort } : {}
+                );
                 toast('success', `Port ${res.port} allocated as ${res.envVar} — restart to apply`);
                 onSaved();
               } catch (err) {
