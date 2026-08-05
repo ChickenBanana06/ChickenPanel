@@ -1,8 +1,10 @@
-# NexPanel
+# ChickenPanel 🐤
 
-AI-powered, cross-platform server management platform. Install it on your own machine or VPS and manage Minecraft servers, Discord bots, websites, files, backups and multiple nodes from a web panel with a built-in AI operator.
+AI-powered, cross-platform server management platform. Install it on your own machine or VPS and manage Minecraft servers, Discord bots, websites, databases, files, backups and multiple nodes from a web panel with a built-in AI operator.
 
 Works on **Windows** and **Linux**. macOS mostly works via the POSIX platform layer but is not officially supported yet.
+
+> The CLI is `chickenpanel` (the older `nexpanel` alias still works). Internal package names (`@nexpanel/*`), environment variables (`NEXPANEL_*`) and data directories keep their original identifiers for compatibility.
 
 ## Quick start
 

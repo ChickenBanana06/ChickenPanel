@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# NexPanel installer for Linux
+# ChickenPanel installer for Linux
 # Usage: sh scripts/install.sh
 # Safe to run repeatedly — it will not destroy an existing installation.
 set -eu
 
-echo "== NexPanel installer (Linux) =="
+echo "== ChickenPanel installer (Linux) =="
 
 # --- Environment detection -------------------------------------------------
 ARCH=$(uname -m)
@@ -50,4 +50,4 @@ echo ""
 echo "== Installation complete =="
 echo "Start the panel:   node apps/cli/dist/index.js start"
 echo "Then open:         http://localhost:3000"
-echo "Tip: ln -s $REPO_ROOT/apps/cli/dist/index.js /usr/local/bin/nexpanel"
+echo "Tip: ln -s $REPO_ROOT/apps/cli/dist/index.js /usr/local/bin/chickenpanel"

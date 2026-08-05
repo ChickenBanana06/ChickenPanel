@@ -1,9 +1,9 @@
-﻿# NexPanel installer for Windows (PowerShell 5.1+)
+﻿# ChickenPanel installer for Windows (PowerShell 5.1+)
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 # Safe to run repeatedly - it will not destroy an existing installation.
 $ErrorActionPreference = 'Stop'
 
-Write-Host "== NexPanel installer (Windows) ==" -ForegroundColor Cyan
+Write-Host "== ChickenPanel installer (Windows) ==" -ForegroundColor Cyan
 
 # --- Environment detection -------------------------------------------------
 $os = [System.Environment]::OSVersion.Version
@@ -12,7 +12,7 @@ $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory 
 $disk = [math]::Round((Get-PSDrive -Name C).Free / 1GB, 1)
 Write-Host "OS: Windows $os  Arch: $arch  RAM: ${ram}GB  Free disk: ${disk}GB"
 
-if ($ram -lt 2) { Write-Warning "Less than 2GB RAM - NexPanel may struggle." }
+if ($ram -lt 2) { Write-Warning "Less than 2GB RAM - ChickenPanel may struggle." }
 if ($disk -lt 5) { Write-Warning "Less than 5GB free disk space." }
 
 # --- Dependencies ----------------------------------------------------------
@@ -53,12 +53,14 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Database initialization failed." }
 # --- Global command shim ---------------------------------------------------
 $npmBin = Join-Path $env:APPDATA 'npm'
 if (Test-Path $npmBin) {
-    $shim = Join-Path $npmBin 'nexpanel.cmd'
-    "@echo off`r`nnode `"$repoRoot\apps\cli\dist\index.js`" %*" | Out-File -FilePath $shim -Encoding ascii
-    Write-Host "Global command installed: nexpanel"
+    foreach ($cmd in @('chickenpanel', 'nexpanel')) {
+        $shim = Join-Path $npmBin "$cmd.cmd"
+        "@echo off`r`nnode `"$repoRoot\apps\cli\dist\index.js`" %*" | Out-File -FilePath $shim -Encoding ascii
+    }
+    Write-Host "Global command installed: chickenpanel"
 }
 
 Write-Host ""
 Write-Host "== Installation complete ==" -ForegroundColor Green
-Write-Host "Start the panel:   nexpanel start"
+Write-Host "Start the panel:   chickenpanel start"
 Write-Host "Then open:         http://localhost:3000"

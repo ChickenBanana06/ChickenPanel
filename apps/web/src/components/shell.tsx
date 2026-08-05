@@ -57,8 +57,9 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* Topbar */}
       <header className="h-12 border-b border-edge flex items-center px-4 gap-4 shrink-0 bg-panel/60">
         <Link href="/" className="flex items-center gap-2 font-semibold text-sm">
-          <span className="w-6 h-6 rounded-lg bg-accent-strong grid place-items-center text-white text-xs font-bold">N</span>
-          NexPanel
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.jpeg" alt="ChickenPanel" className="w-7 h-7 rounded-lg object-cover" />
+          ChickenPanel
         </Link>
         <div className="flex-1" />
         <span className="text-xs text-dim">

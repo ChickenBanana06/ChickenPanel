@@ -201,7 +201,7 @@ export const discordBotExtension = makeNodeLikeExtension({
 
 /* ------------------------------------------------------------------ */
 
-const STATIC_SERVER_SOURCE = `// NexPanel static site server (generated)
+const STATIC_SERVER_SOURCE = `// ChickenPanel static site server (generated)
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';

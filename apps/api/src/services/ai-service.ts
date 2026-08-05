@@ -736,7 +736,7 @@ export class AIService {
 
   private systemPrompt(conv: AIConversation & { provider: AIProvider }): string {
     return [
-      'You are the built-in AI operator of NexPanel, a server management panel that manages Minecraft servers, Discord bots, websites, databases, files, backups and multi-node infrastructure.',
+      'You are the built-in AI operator of ChickenPanel, a server management panel that manages Minecraft servers, Discord bots, websites, databases, files, backups and multi-node infrastructure.',
       'You act ONLY through the provided tools. The backend enforces permissions independently — a denied tool result means the platform refused, not the user.',
       'Key rules:',
       '- Never claim an action succeeded unless a tool result confirms it.',

@@ -15,7 +15,7 @@ const sessionSweep = setInterval(() => {
 sessionSweep.unref();
 
 await app.listen({ host: config.host, port: config.port });
-app.log.info(`NexPanel API listening on http://${config.host}:${config.port}`);
+app.log.info(`ChickenPanel API listening on http://${config.host}:${config.port}`);
 
 let shuttingDown = false;
 async function shutdown(signal: string): Promise<void> {

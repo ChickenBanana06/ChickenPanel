@@ -1,4 +1,4 @@
-# NexPanel architecture
+# ChickenPanel architecture
 
 ```
 Web UI (Next.js)

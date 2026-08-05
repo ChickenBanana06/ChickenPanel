@@ -187,7 +187,7 @@ const [, , command, arg1] = process.argv;
 
 switch (command) {
   case 'install': {
-    console.log('NexPanel install: initializing database and running migrations…');
+    console.log('ChickenPanel install: initializing database and running migrations…');
     startService(SERVICES.db);
     const dbUp = await waitForPort(5490, '127.0.0.1', 60000);
     if (!dbUp) {
@@ -243,7 +243,7 @@ switch (command) {
     break;
   }
   case 'update': {
-    console.log('Rebuilding NexPanel…');
+    console.log('Rebuilding ChickenPanel…');
     execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['install'], {
       cwd: repoRoot, stdio: 'inherit', shell: process.platform === 'win32',
     });
@@ -279,18 +279,18 @@ switch (command) {
     break;
   }
   default:
-    console.log(`NexPanel CLI
+    console.log(`ChickenPanel CLI
 
 Usage:
-  nexpanel install               Initialize database + run migrations
-  nexpanel start [svc[,svc]]     Start services (default: db,api,web)
-  nexpanel stop [svc[,svc]]      Stop services (default: all)
-  nexpanel restart [svc[,svc]]   Restart services (default: web,api)
-  nexpanel status                Show service status
-  nexpanel logs <svc>            Show last 100 log lines (db|api|web|agent)
-  nexpanel update                Reinstall deps, rebuild, migrate
-  nexpanel node register <url> <token>
-                                 Configure the local Node Agent
+  chickenpanel install               Initialize database + run migrations
+  chickenpanel start [svc[,svc]]     Start services (default: db,api,web)
+  chickenpanel stop [svc[,svc]]      Stop services (default: all)
+  chickenpanel restart [svc[,svc]]   Restart services (default: web,api)
+  chickenpanel status                Show service status
+  chickenpanel logs <svc>            Show last 100 log lines (db|api|web|agent)
+  chickenpanel update                Reinstall deps, rebuild, migrate
+  chickenpanel node register <url> <token>
+                                     Configure the local Node Agent
 `);
     if (command && command !== 'help' && command !== '--help') process.exit(1);
 }

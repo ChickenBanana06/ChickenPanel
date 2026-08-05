@@ -42,9 +42,10 @@ export default function LoginPage() {
     <div className="min-h-screen grid place-items-center p-4">
       <Card className="w-full max-w-sm p-8">
         <div className="flex items-center gap-2.5 mb-6">
-          <div className="w-9 h-9 rounded-xl bg-accent-strong grid place-items-center font-bold text-white">N</div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.jpeg" alt="ChickenPanel" className="w-10 h-10 rounded-xl object-cover" />
           <div>
-            <h1 className="font-semibold leading-tight">NexPanel</h1>
+            <h1 className="font-semibold leading-tight">ChickenPanel</h1>
             <p className="text-xs text-dim leading-tight">
               {effectiveMode === 'register' && setup?.needsSetup
                 ? 'Create the administrator account'

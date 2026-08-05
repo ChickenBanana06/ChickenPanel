@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "chickenpanel": "./dist/index.js",
     "nexpanel": "./dist/index.js"
   },
   "scripts": {

@@ -3,8 +3,9 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'NexPanel',
+  title: 'ChickenPanel',
   description: 'AI-powered server management platform',
+  icons: { icon: '/logo.jpeg' },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -152,7 +152,7 @@ function ConsoleTab({ appId, running, isMinecraft }: { appId: string; running: b
     try {
       await api('PUT', `/apps/${appId}/files/content`, {
         path: 'eula.txt',
-        content: '# Accepted by the server owner via NexPanel\neula=true\n',
+        content: '# Accepted by the server owner via ChickenPanel\neula=true\n',
       });
       await api('PATCH', `/apps/${appId}`, { config: { eulaAccepted: true } });
       await api('POST', `/apps/${appId}/start`);
