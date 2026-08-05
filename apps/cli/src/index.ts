@@ -189,6 +189,16 @@ const [, , command, arg1] = process.argv;
 
 switch (command) {
   case 'install': {
+    if (process.platform !== 'win32' && process.getuid && process.getuid() === 0) {
+      console.error(
+        "\nERROR: PostgreSQL cannot be run as 'root' for security reasons.\n" +
+        "You are running this command as root, which prevents the embedded database from starting.\n\n" +
+        "To resolve this, please either:\n" +
+        "  1. Run ChickenPanel as a non-root user (Recommended).\n" +
+        "  2. Configure an external PostgreSQL database by setting the DATABASE_URL environment variable.\n"
+      );
+      process.exit(1);
+    }
     console.log('ChickenPanel install: initializing database and running migrations…');
     startService(SERVICES.db);
     const dbUp = await waitForPort(5490, '127.0.0.1', 60000);
@@ -206,7 +216,18 @@ switch (command) {
     break;
   }
   case 'start': {
-    for (const name of parseServices(arg1, ['db', 'api', 'web'])) {
+    const servicesToStart = parseServices(arg1, ['db', 'api', 'web']);
+    if (servicesToStart.includes('db') && process.platform !== 'win32' && process.getuid && process.getuid() === 0) {
+      console.error(
+        "\nERROR: PostgreSQL cannot be run as 'root' for security reasons.\n" +
+        "You are running this command as root, which prevents the embedded database from starting.\n\n" +
+        "To resolve this, please either:\n" +
+        "  1. Run ChickenPanel as a non-root user (Recommended).\n" +
+        "  2. Configure an external PostgreSQL database by setting the DATABASE_URL environment variable.\n"
+      );
+      process.exit(1);
+    }
+    for (const name of servicesToStart) {
       startService(SERVICES[name]);
       if (name === 'db') await waitForPort(5490, '127.0.0.1', 60000);
       if (name === 'api') await waitForPort(Number(process.env.NEXPANEL_API_PORT ?? 4000), '127.0.0.1', 30000);
