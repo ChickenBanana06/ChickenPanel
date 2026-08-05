@@ -69,18 +69,19 @@ export class AppService {
       }
     });
 
-    this.ctx.tasks.registerRunner('app.delete', async (handle, data) => {
+    // Best-effort node-side cleanup after the control-plane record is already
+    // gone. Stops the process and removes files; if the node is offline the
+    // files are left behind (harmless orphans) rather than blocking deletion.
+    this.ctx.tasks.registerRunner('app.cleanup', async (handle, data) => {
       const appId = data.appId as string;
       const nodeId = data.nodeId as string;
-      const removeFiles = data.removeFiles !== false;
-      await handle.log('Removing application from node');
       if (this.ctx.nodes.isOnline(nodeId)) {
-        await this.ctx.nodes.command(nodeId, { op: 'app.delete', appId, removeFiles }, { timeoutMs: 120000 });
+        await handle.log('Removing application files from node');
+        await this.ctx.nodes.command(nodeId, { op: 'app.delete', appId, removeFiles: true }, { timeoutMs: 120000 });
+        await handle.log('Cleanup complete');
       } else {
-        await handle.log('Node offline — removing control plane record only', 'warn');
+        await handle.log('Node offline — files will remain until it reconnects', 'warn');
       }
-      await this.ctx.db.application.delete({ where: { id: appId } }).catch(() => undefined);
-      this.ctx.realtime.publish('apps', 'app.deleted', { appId });
       return { appId };
     });
   }
@@ -218,11 +219,16 @@ export class AppService {
 
   async requestDelete(appId: string, userId?: string): Promise<string> {
     const app = await this.get(appId);
-    await this.setStatus(appId, 'deleting');
+    // Remove the control-plane record immediately so the application vanishes
+    // from the UI right away. Cascades to its backups; existing tasks keep
+    // their history (applicationId is set null).
+    await this.ctx.db.application.delete({ where: { id: appId } });
+    this.ctx.realtime.publish('apps', 'app.deleted', { appId });
+    // Clean up the process and files on the node in the background.
     const task = await this.ctx.tasks.create({
-      kind: 'app.delete',
-      title: `Delete ${app.name}`,
-      data: { appId: app.id, nodeId: app.nodeId, removeFiles: true },
+      kind: 'app.cleanup',
+      title: `Clean up ${app.name}`,
+      data: { appId: app.id, nodeId: app.nodeId },
       userId,
     });
     return task.id;
