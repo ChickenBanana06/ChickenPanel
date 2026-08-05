@@ -1,12 +1,12 @@
 # ChickenPanel one-line installer (Windows PowerShell)
 #
-#   irm https://raw.githubusercontent.com/OWNER/chickenpanel/main/scripts/bootstrap.ps1 | iex
+#   irm https://raw.githubusercontent.com/ChickenBanana06/chickenpanel/main/scripts/bootstrap.ps1 | iex
 #
 # Clones (or updates) ChickenPanel and builds it. Then start the panel, or
 # connect this machine as a node. Safe to re-run.
 $ErrorActionPreference = 'Stop'
 
-$repo   = if ($env:CHICKENPANEL_REPO)   { $env:CHICKENPANEL_REPO }   else { 'OWNER/chickenpanel' }
+$repo   = if ($env:CHICKENPANEL_REPO)   { $env:CHICKENPANEL_REPO }   else { 'ChickenBanana06/chickenpanel' }
 $branch = if ($env:CHICKENPANEL_BRANCH) { $env:CHICKENPANEL_BRANCH } else { 'main' }
 $dir    = if ($env:CHICKENPANEL_DIR)    { $env:CHICKENPANEL_DIR }    else { Join-Path $HOME 'chickenpanel' }
 
