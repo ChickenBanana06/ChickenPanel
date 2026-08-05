@@ -68,7 +68,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={effectiveMode === 'register' ? 10 : 1}
+              minLength={1}
             />
           </Field>
           <Button type="submit" variant="primary" className="w-full" disabled={busy}>

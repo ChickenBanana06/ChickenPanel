@@ -111,8 +111,8 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext): Promise
     if (!body.username || !/^[a-zA-Z0-9_.-]{3,32}$/.test(body.username)) {
       throw ApiError.badRequest('Username must be 3-32 characters (letters, numbers, ., _, -)');
     }
-    if (!body.password || body.password.length < 8 || body.password.length > 256) {
-      throw ApiError.badRequest('Password must be at least 8 characters');
+    if (!body.password || body.password.length < 1 || body.password.length > 256) {
+      throw ApiError.badRequest('Password must be at least 1 character');
     }
     const role = body.role ?? 'USER';
     if (!['ADMIN', 'USER', 'VIEWER'].includes(role)) throw ApiError.badRequest('Invalid role');
@@ -156,8 +156,8 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext): Promise
     if (body.role && !['ADMIN', 'USER', 'VIEWER'].includes(body.role)) throw ApiError.badRequest('Invalid role');
     let passwordHash: string | undefined;
     if (body.password !== undefined) {
-      if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 256) {
-        throw ApiError.badRequest('Password must be at least 8 characters');
+      if (typeof body.password !== 'string' || body.password.length < 1 || body.password.length > 256) {
+        throw ApiError.badRequest('Password must be at least 1 character');
       }
       const { hashPassword } = await import('../lib/passwords.js');
       passwordHash = await hashPassword(body.password);
