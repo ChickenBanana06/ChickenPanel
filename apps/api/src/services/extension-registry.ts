@@ -8,6 +8,11 @@ export interface ExtensionContext {
   allocatePorts: (nodeId: string, count: number, preferred?: number[]) => Promise<number[]>;
 }
 
+export interface ExtensionStartHelpers {
+  db: PrismaClient;
+  command: <T = unknown>(cmd: unknown, opts?: { timeoutMs?: number }) => Promise<T>;
+}
+
 export interface CreationInput {
   name: string;
   nodeId: string;
@@ -61,6 +66,7 @@ export interface ApplicationExtension {
   /** Rebuild the runtime spec from a stored application (start/sync). */
   buildRuntimeSpec(app: Application): AppRuntimeSpec;
   actions?: ExtensionAction[];
+  onBeforeStart?: (app: Application, helpers: ExtensionStartHelpers) => Promise<void>;
 }
 
 export class ExtensionRegistry {

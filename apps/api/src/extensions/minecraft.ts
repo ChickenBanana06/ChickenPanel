@@ -73,6 +73,56 @@ export const minecraftExtension: ApplicationExtension = {
     };
   },
 
+  async onBeforeStart(app, helpers) {
+    const cfg = MinecraftConfigSchema.parse(app.config);
+    if (cfg.isProxy) return; // Proxies don't have server.properties
+    const primaryPort = app.ports[0];
+    if (primaryPort === undefined) return;
+
+    let content = '';
+    try {
+      const fileRes = await helpers.command<{ content: string }>({
+        op: 'fs.read',
+        appId: app.id,
+        path: 'server.properties',
+      });
+      content = fileRes.content;
+    } catch {
+      // Use buildServerProperties if file doesn't exist
+    }
+
+    if (content) {
+      const lines = content.split('\n');
+      let hasServerPort = false;
+      let hasQueryPort = false;
+      const updatedLines = lines.map((line) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('server-port=')) {
+          hasServerPort = true;
+          return `server-port=${primaryPort}`;
+        }
+        if (trimmed.startsWith('query.port=')) {
+          hasQueryPort = true;
+          return `query.port=${primaryPort}`;
+        }
+        return line;
+      });
+      if (!hasServerPort) updatedLines.push(`server-port=${primaryPort}`);
+      if (!hasQueryPort) updatedLines.push(`query.port=${primaryPort}`);
+      content = updatedLines.join('\n');
+    } else {
+      const { buildServerProperties } = await import('@nexpanel/ext-minecraft');
+      content = buildServerProperties(cfg, primaryPort, app.name);
+    }
+
+    await helpers.command({
+      op: 'fs.write',
+      appId: app.id,
+      path: 'server.properties',
+      content,
+    });
+  },
+
   actions: [
     {
       id: 'install_plugin',

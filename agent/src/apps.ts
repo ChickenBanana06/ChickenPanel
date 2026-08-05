@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, exec, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -11,6 +11,17 @@ import { joinCommandLine } from './quote.js';
 const LOG_BUFFER_LINES = 1000;
 const RESTART_BACKOFF_MS = [2000, 5000, 10000, 30000, 60000];
 const CRASH_WINDOW_MS = 10 * 60 * 1000;
+
+function tryOpenFirewallPorts(ports: number[]): void {
+  if (process.platform !== 'linux' || !ports || ports.length === 0) return;
+  for (const port of ports) {
+    exec(`sudo ufw allow ${port} || ufw allow ${port}`, (err) => {
+      if (err) {
+        exec(`sudo firewall-cmd --add-port=${port}/tcp --add-port=${port}/udp --permanent && sudo firewall-cmd --reload`, () => {});
+      }
+    });
+  }
+}
 
 export interface AppEvents {
   onStatus: (appId: string, status: AppStatus, exitCode?: number | null) => void;
@@ -147,6 +158,8 @@ export class AppSupervisor {
 
     const cwd = this.sandbox.appRoot(appId);
     fs.mkdirSync(cwd, { recursive: true });
+
+    tryOpenFirewallPorts(spec.ports ?? []);
 
     this.events.onStatus(appId, 'starting');
     const commandLine = joinCommandLine(spec.startCommand, process.platform);

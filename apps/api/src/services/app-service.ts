@@ -226,10 +226,23 @@ export class AppService {
     return { ...ext.buildRuntimeSpec(app), appId: app.id };
   }
 
+  private async runPreStartHook(app: Application): Promise<void> {
+    const ext = this.ctx.extensions.get(app.type);
+    if (ext?.onBeforeStart) {
+      const helpers = {
+        db: this.ctx.db,
+        command: <T>(cmd: unknown, opts?: { timeoutMs?: number }) =>
+          this.ctx.nodes.command<T>(app.nodeId, cmd as any, opts),
+      };
+      await ext.onBeforeStart(app, helpers);
+    }
+  }
+
   async start(appId: string): Promise<void> {
     const app = await this.get(appId);
     // Sync the spec first so config changes take effect on restart.
     await this.ctx.nodes.command(app.nodeId, { op: 'app.sync', spec: this.buildSpec(app) });
+    await this.runPreStartHook(app);
     await this.ctx.nodes.command(app.nodeId, { op: 'app.start', appId }, { timeoutMs: 120000 });
   }
 
@@ -242,6 +255,7 @@ export class AppService {
     const app = await this.get(appId);
     await this.ctx.nodes.command(app.nodeId, { op: 'app.stop', appId }, { timeoutMs: 180000 });
     await this.ctx.nodes.command(app.nodeId, { op: 'app.sync', spec: this.buildSpec(app) });
+    await this.runPreStartHook(app);
     await this.ctx.nodes.command(app.nodeId, { op: 'app.start', appId }, { timeoutMs: 120000 });
   }
 
