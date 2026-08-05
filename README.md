@@ -8,7 +8,23 @@ Works on **Windows** and **Linux**. macOS mostly works via the POSIX platform la
 
 ## Quick start
 
-Requirements: **Node.js 20+** (Java 21+ for Minecraft servers, Git for git deployments).
+Requirements: **Node.js 20+** and **git** (Java 21+ for Minecraft, but the panel auto-downloads a JRE when missing).
+
+### One-line install (from GitHub)
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/OWNER/chickenpanel/main/scripts/bootstrap.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/OWNER/chickenpanel/main/scripts/bootstrap.ps1 | iex
+```
+
+This clones the repo, installs dependencies and builds. Then `chickenpanel install` (first run) and `chickenpanel start`. To connect the machine as a **node** instead, run `chickenpanel node register http://PANEL_IP:4000 TOKEN` then `chickenpanel start agent`.
+
+### From a local clone
 
 ```bash
 # Windows (PowerShell)
