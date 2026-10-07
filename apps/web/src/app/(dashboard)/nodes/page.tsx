@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import useSWR from 'swr';
-import { Plus, Trash2, KeyRound, Copy } from 'lucide-react';
+import { Plus, Trash2, KeyRound, Copy, Server, Zap, CheckCircle2, RotateCw, Globe, Terminal } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
-import { Button, Card, EmptyState, Field, Input, Modal, StatusBadge, useToast } from '@/components/ui';
+import { Button, Card, EmptyState, Field, Input, Modal, StatusBadge, useToast, cx } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 
 interface NodeRow {
@@ -24,40 +24,133 @@ export default function NodesPage() {
   const { can } = useAuth();
   const { data, mutate } = useSWR<{ nodes: NodeRow[] }>('/nodes', fetcher);
   const [showAdd, setShowAdd] = useState(false);
+  const [addTab, setAddTab] = useState<'local' | 'remote'>('local');
   const [name, setName] = useState('');
+  const [createdNodeId, setCreatedNodeId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [autoConnecting, setAutoConnecting] = useState(false);
+
   useRealtimeTopic('nodes', () => void mutate());
 
   const nodes = data?.nodes ?? [];
+  const hasConnectedNode = nodes.some((n) => n.connected);
+  const createdNode = createdNodeId ? nodes.find((n) => n.id === createdNodeId) : null;
+  const isCreatedNodeConnected = Boolean(createdNode?.connected);
+
+  async function handleAutoConnectLocal() {
+    setAutoConnecting(true);
+    try {
+      const res = await api<{ ok: boolean; node: { id: string; name: string }; connected: boolean; message: string }>(
+        'POST',
+        '/nodes/auto-connect-local',
+      );
+      toast('success', res.message || 'Local node connected successfully!');
+      void mutate();
+      setShowAdd(false);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Failed to connect local node');
+    } finally {
+      setAutoConnecting(false);
+    }
+  }
 
   return (
     <div className="space-y-4 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Nodes</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold flex items-center gap-2">
+            <Server size={20} className="text-accent" />
+            <span>Nodes & Servers</span>
+          </h1>
+          <p className="text-xs text-dim mt-0.5">
+            Manage machines connected to ChickenPanel that host game servers, bots, and databases.
+          </p>
+        </div>
         {can('node.manage') && (
-          <Button variant="primary" onClick={() => { setToken(null); setName(''); setShowAdd(true); }}>
-            <span className="flex items-center gap-1.5"><Plus size={14} /> Add node</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={autoConnecting}
+              onClick={handleAutoConnectLocal}
+            >
+              <span className="flex items-center gap-1.5">
+                {autoConnecting ? <RotateCw size={13} className="animate-spin" /> : <Zap size={13} className="text-accent" />}
+                Auto-Connect Local
+              </span>
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setToken(null);
+                setCreatedNodeId(null);
+                setName('');
+                setAddTab(nodes.length === 0 ? 'local' : 'remote');
+                setShowAdd(true);
+              }}
+            >
+              <span className="flex items-center gap-1.5"><Plus size={14} /> Add Node</span>
+            </Button>
+          </div>
         )}
       </div>
 
+      {!hasConnectedNode && can('node.manage') && (
+        <div className="p-4 rounded-xl border border-accent/40 bg-accent/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Zap className="text-accent" size={16} />
+              <h3 className="text-sm font-semibold text-ink">Host Servers on This Machine</h3>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent/20 text-accent">1-Click Setup</span>
+            </div>
+            <p className="text-xs text-dim leading-relaxed">
+              ChickenPanel is installed on this server. Connect this machine as your primary node in 1 click to start deploying Minecraft servers immediately.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            disabled={autoConnecting}
+            onClick={handleAutoConnectLocal}
+          >
+            {autoConnecting ? (
+              <span className="flex items-center gap-1.5"><RotateCw size={13} className="animate-spin" /> Connecting Agent...</span>
+            ) : (
+              <span className="flex items-center gap-1.5"><Zap size={13} /> Auto-Connect This Server</span>
+            )}
+          </Button>
+        </div>
+      )}
+
       {nodes.length === 0 ? (
-        <Card><EmptyState title="No nodes yet" hint="Add a node to connect a machine to the panel." /></Card>
+        <Card>
+          <EmptyState
+            title="No nodes connected yet"
+            hint="Connect this server with 1 click or register an external VPS to begin deploying game servers."
+          />
+        </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {nodes.map((n) => (
-            <Card key={n.id} className="p-4 space-y-2">
+            <Card key={n.id} className="p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <h3 className="font-medium flex-1">{n.name}</h3>
-                <StatusBadge status={n.connected ? 'ONLINE' : 'OFFLINE'} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium text-sm text-ink truncate">{n.name}</h3>
+                    <StatusBadge status={n.connected ? 'ONLINE' : 'OFFLINE'} />
+                  </div>
+                  <p className="text-xs text-dim truncate">
+                    {n.description ?? `${n.osVersion ?? 'Linux'} · ${n.arch ?? 'x64'}`}
+                  </p>
+                </div>
                 {can('node.manage') && (
                   <button
-                    className="text-dim hover:text-bad"
+                    className="text-dim hover:text-bad p-1 rounded transition-colors"
                     title="Delete node"
                     onClick={async () => {
                       if (!window.confirm(`Delete node "${n.name}"?`)) return;
                       try {
                         await api('DELETE', `/nodes/${n.id}`);
+                        toast('success', `Node "${n.name}" deleted`);
                         void mutate();
                       } catch (err) {
                         toast('error', err instanceof Error ? err.message : 'Delete failed');
@@ -68,10 +161,12 @@ export default function NodesPage() {
                   </button>
                 )}
               </div>
-              <p className="text-xs text-dim">
-                {n.osVersion ?? 'OS unknown'} · {n.arch ?? '?'} · agent {n.agentVersion ?? '—'}
-              </p>
-              <p className="text-xs text-faint">{n.cpuModel ?? ''}</p>
+
+              <div className="text-xs text-faint flex items-center justify-between">
+                <span>{n.cpuModel ?? 'CPU model unknown'}</span>
+                <span>Agent v{n.agentVersion ?? '—'}</span>
+              </div>
+
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <Metric label="CPU" value={n.connected && n.lastMetrics ? `${Math.round(n.lastMetrics.cpuPercent)}%` : '—'} />
                 <Metric
@@ -91,71 +186,135 @@ export default function NodesPage() {
                   }
                 />
               </div>
-              <p className="text-xs text-faint">
-                {n.applicationCount} application(s)
-                {n.capabilities && (
-                  <>
-                    {' · '}
-                    {[
-                      n.capabilities.java && 'java',
-                      n.capabilities.node && 'node',
-                      n.capabilities.python && 'python',
-                      n.capabilities.docker && 'docker',
-                      n.capabilities.git && 'git',
-                    ].filter(Boolean).join(', ')}
-                  </>
+
+              <div className="flex items-center justify-between text-xs text-faint pt-1 border-t border-edge">
+                <span>
+                  {n.applicationCount} application{n.applicationCount === 1 ? '' : 's'}
+                  {n.capabilities && (
+                    <>
+                      {' · '}
+                      {[
+                        n.capabilities.java && 'java',
+                        n.capabilities.docker && 'docker',
+                        n.capabilities.node && 'node',
+                        n.capabilities.git && 'git',
+                      ].filter(Boolean).join(', ')}
+                    </>
+                  )}
+                </span>
+                {can('node.manage') && (
+                  <button
+                    className="text-dim hover:text-ink flex items-center gap-1 transition-colors"
+                    onClick={async () => {
+                      if (!window.confirm('Rotate registration token? The agent will need re-registration.')) return;
+                      try {
+                        const res = await api<{ registrationToken: string }>('POST', `/nodes/${n.id}/rotate-token`);
+                        setToken(res.registrationToken);
+                        setName(n.name);
+                        setCreatedNodeId(n.id);
+                        setAddTab('remote');
+                        setShowAdd(true);
+                      } catch (err) {
+                        toast('error', err instanceof Error ? err.message : 'Failed');
+                      }
+                    }}
+                  >
+                    <KeyRound size={11} /> Rotate token
+                  </button>
                 )}
-              </p>
-              {can('node.manage') && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={async () => {
-                    if (!window.confirm('Rotate the registration token? The agent must be reconfigured.')) return;
-                    try {
-                      const res = await api<{ registrationToken: string }>('POST', `/nodes/${n.id}/rotate-token`);
-                      setToken(res.registrationToken);
-                      setName(n.name);
-                      setShowAdd(true);
-                    } catch (err) {
-                      toast('error', err instanceof Error ? err.message : 'Failed');
-                    }
-                  }}
-                >
-                  <span className="flex items-center gap-1"><KeyRound size={12} /> Rotate token</span>
-                </Button>
-              )}
+              </div>
             </Card>
           ))}
         </div>
       )}
 
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={token ? 'Connect the agent' : 'Add node'} wide>
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={token ? 'Node Registration & Connection' : 'Add Node'} wide>
         {token ? (
-          <TokenInstructions name={name} token={token} />
+          <TokenInstructions
+            name={name}
+            token={token}
+            isOnline={isCreatedNodeConnected}
+            onClose={() => setShowAdd(false)}
+          />
         ) : (
           <div className="space-y-4">
-            <Field label="Node name">
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="vps-1" autoFocus />
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
-              <Button
-                variant="primary"
-                disabled={!name}
-                onClick={async () => {
-                  try {
-                    const res = await api<{ registrationToken: string }>('POST', '/nodes', { name });
-                    setToken(res.registrationToken);
-                    void mutate();
-                  } catch (err) {
-                    toast('error', err instanceof Error ? err.message : 'Failed');
-                  }
-                }}
+            <div className="flex rounded-lg bg-bg p-1 border border-edge">
+              <button
+                type="button"
+                onClick={() => setAddTab('local')}
+                className={cx(
+                  'flex-1 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center justify-center gap-1.5',
+                  addTab === 'local' ? 'bg-raised text-ink shadow-sm' : 'text-dim hover:text-ink'
+                )}
               >
-                Create
-              </Button>
+                <Zap size={13} className="text-accent" />
+                This Machine (Local Server)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddTab('remote')}
+                className={cx(
+                  'flex-1 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center justify-center gap-1.5',
+                  addTab === 'remote' ? 'bg-raised text-ink shadow-sm' : 'text-dim hover:text-ink'
+                )}
+              >
+                <Globe size={13} />
+                Remote VPS / External Node
+              </button>
             </div>
+
+            {addTab === 'local' ? (
+              <div className="space-y-3 py-2">
+                <div className="p-3.5 bg-raised rounded-xl border border-edge text-xs leading-relaxed space-y-2">
+                  <div className="font-semibold text-ink flex items-center gap-1.5">
+                    <Server size={14} className="text-accent" />
+                    Instant Local Node Provisioning
+                  </div>
+                  <p className="text-dim">
+                    Clicking below will automatically create the node entry, configure the local agent credentials, and start the daemon service in the background. No SSH or terminal commands needed.
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
+                  <Button
+                    variant="primary"
+                    disabled={autoConnecting}
+                    onClick={handleAutoConnectLocal}
+                  >
+                    {autoConnecting ? (
+                      <span className="flex items-center gap-1.5"><RotateCw size={13} className="animate-spin" /> Connecting...</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5"><Zap size={13} /> Connect This Server Now</span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <Field label="Node Name (e.g. vps-frankfurt or dedicated-node-2)">
+                  <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="vps-germany" autoFocus />
+                </Field>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
+                  <Button
+                    variant="primary"
+                    disabled={!name}
+                    onClick={async () => {
+                      try {
+                        const res = await api<{ node: { id: string; name: string }; registrationToken: string }>('POST', '/nodes', { name });
+                        setToken(res.registrationToken);
+                        setCreatedNodeId(res.node.id);
+                        void mutate();
+                      } catch (err) {
+                        toast('error', err instanceof Error ? err.message : 'Failed');
+                      }
+                    }}
+                  >
+                    Generate Token & Connect
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>
@@ -172,33 +331,76 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TokenInstructions({ name, token }: { name: string; token: string }) {
+function TokenInstructions({
+  name,
+  token,
+  isOnline,
+  onClose,
+}: {
+  name: string;
+  token: string;
+  isOnline: boolean;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const origin = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:4000` : '';
-  const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const registerCmd = `node apps/cli/dist/index.js node register ${origin} ${token}`;
-  const startCmd = `node apps/cli/dist/index.js start agent`;
+  const registerCmd = `chickenpanel node register ${origin} ${token} && chickenpanel start agent`;
+  const manualCmd = `cd ~/chickenpanel && node apps/cli/dist/index.js node register ${origin} ${token} && node apps/cli/dist/index.js start agent`;
+  const winCmd = `chickenpanel node register ${origin} ${token}; chickenpanel start agent`;
 
   return (
     <div className="space-y-4 text-sm">
-      <p>
-        Node <strong>{name}</strong> created. This registration token is shown <strong>once</strong> — store it safely.
-      </p>
-      <CopyBlock label="Registration token" value={token} onCopy={() => toast('success', 'Copied')} />
-      {isLocal && (
-        <div className="p-3 bg-bad/10 border border-bad/20 text-bad rounded-lg text-xs leading-relaxed">
-          <strong>⚠️ Warning:</strong> You are currently accessing this panel via <code>localhost</code>. 
-          If you are registering a remote machine, you <strong>must</strong> replace <code>localhost</code> in the command below 
-          with your panel server&apos;s public IP address.
+      <div className="flex items-center justify-between pb-3 border-b border-edge">
+        <div>
+          <p className="font-medium text-ink">
+            Node: <strong>{name}</strong>
+          </p>
+          <p className="text-xs text-dim">Registration token generated. Shown once for security.</p>
         </div>
-      )}
-      <div>
-        <p className="text-xs text-dim mb-1.5">Run these commands on the target machine inside the project directory:</p>
-        <CopyBlock label="1. Register the Node" value={registerCmd} onCopy={() => toast('success', 'Copied')} />
-        <div className="mt-2">
-          <CopyBlock label="2. Start the Agent" value={startCmd} onCopy={() => toast('success', 'Copied')} />
+        <div className="flex items-center gap-2">
+          {isOnline ? (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <CheckCircle2 size={13} /> Connected & Online
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Waiting for Agent...
+            </span>
+          )}
         </div>
       </div>
+
+      <CopyBlock label="Registration token" value={token} onCopy={() => toast('success', 'Token copied')} />
+
+      <div className="space-y-2.5 pt-1">
+        <p className="text-xs text-dim font-medium">Run this single command on the target machine in terminal:</p>
+        <CopyBlock
+          label="Option A: ChickenPanel CLI (Recommended)"
+          value={registerCmd}
+          onCopy={() => toast('success', 'Command copied')}
+        />
+        <CopyBlock
+          label="Option B: Direct Node.js path (If run from repository checkout)"
+          value={manualCmd}
+          onCopy={() => toast('success', 'Command copied')}
+        />
+        <CopyBlock
+          label="Option C: Windows PowerShell"
+          value={winCmd}
+          onCopy={() => toast('success', 'PowerShell command copied')}
+        />
+      </div>
+
+      {isOnline ? (
+        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center justify-between">
+          <span>Success! Agent connected to the panel and is actively reporting telemetry.</span>
+          <Button variant="primary" size="sm" onClick={onClose}>Done</Button>
+        </div>
+      ) : (
+        <div className="flex justify-end gap-2 pt-2 border-t border-edge">
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </div>
+      )}
     </div>
   );
 }

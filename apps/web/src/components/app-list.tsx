@@ -124,7 +124,7 @@ export function CreateAppModal({
   const { data: typesData } = useSWR<{ types: { type: string; displayName: string; description: string }[] }>(
     open ? '/apps/types' : null, fetcher,
   );
-  const { data: nodesData } = useSWR<{ nodes: NodeRow[] }>(open ? '/nodes' : null, fetcher);
+  const { data: nodesData, mutate: mutateNodes } = useSWR<{ nodes: NodeRow[] }>(open ? '/nodes' : null, fetcher);
   const types = (typesData?.types ?? []).filter((t) => !allowedTypes || allowedTypes.includes(t.type));
   const nodes = (nodesData?.nodes ?? []).filter((n) => n.connected);
 
@@ -247,7 +247,24 @@ export function CreateAppModal({
     <Modal open={open} onClose={onClose} title="Create application" wide>
       <div className="space-y-4">
         {nodes.length === 0 && (
-          <p className="text-xs text-warn">No online nodes. Add and connect a node first.</p>
+          <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between gap-3 text-xs">
+            <span className="text-amber-400">No online nodes available to host applications.</span>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={async () => {
+                try {
+                  await api('POST', '/nodes/auto-connect-local');
+                  toast('success', 'Local node connected!');
+                  void mutateNodes();
+                } catch (err) {
+                  toast('error', err instanceof Error ? err.message : 'Failed to connect local node');
+                }
+              }}
+            >
+              ⚡ Auto-Connect Local Server
+            </Button>
+          </div>
         )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Name">

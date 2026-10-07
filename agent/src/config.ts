@@ -27,19 +27,36 @@ export function defaultAgentDataDir(): string {
 export function loadAgentConfig(): AgentConfig {
   const dataDir = defaultAgentDataDir();
   let fileCfg: Partial<AgentConfig> = {};
-  try {
-    fileCfg = JSON.parse(fs.readFileSync(path.join(dataDir, 'agent.json'), 'utf8')) as Partial<AgentConfig>;
-  } catch {
-    // no config file yet
+  const candidateFiles = [
+    path.join(dataDir, 'agent.json'),
+    '/home/chickenpanel/.local/share/nexpanel-agent/agent.json',
+    '/root/.local/share/nexpanel-agent/agent.json',
+  ];
+  for (const candidate of candidateFiles) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8')) as Partial<AgentConfig>;
+        if (parsed.panelUrl && parsed.token) {
+          fileCfg = parsed;
+          break;
+        }
+      }
+    } catch {
+      // try next candidate
+    }
   }
   const panelUrl = process.env.NEXPANEL_URL ?? fileCfg.panelUrl;
   const token = process.env.NEXPANEL_NODE_TOKEN ?? fileCfg.token;
   if (!panelUrl || !token) {
     throw new Error(
-      'Agent is not configured. Set NEXPANEL_URL and NEXPANEL_NODE_TOKEN, or run "nexpanel node register".',
+      'Agent is not configured. Set NEXPANEL_URL and NEXPANEL_NODE_TOKEN, or run "chickenpanel node register <url> <token>".',
     );
   }
-  fs.mkdirSync(dataDir, { recursive: true });
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch {
+    // ignore if cannot create
+  }
   return { panelUrl, token, dataDir };
 }
 

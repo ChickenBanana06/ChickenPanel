@@ -23,11 +23,28 @@ const repoRoot = path.resolve(here, '..', '..', '..');
 
 function dataDir(): string {
   if (process.env.NEXPANEL_DATA_DIR) return process.env.NEXPANEL_DATA_DIR;
+  if (process.platform !== 'win32' && process.getuid && process.getuid() === 0) {
+    const cpData = '/home/chickenpanel/.local/share/nexpanel';
+    if (fs.existsSync(cpData)) return cpData;
+  }
   const base =
     process.platform === 'win32'
       ? (process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'))
       : path.join(os.homedir(), '.local', 'share');
   return path.join(base, 'nexpanel');
+}
+
+function agentDataDir(): string {
+  if (process.env.NEXPANEL_AGENT_DATA) return process.env.NEXPANEL_AGENT_DATA;
+  if (process.platform !== 'win32' && process.getuid && process.getuid() === 0) {
+    const cpAgent = '/home/chickenpanel/.local/share/nexpanel-agent';
+    if (fs.existsSync('/home/chickenpanel')) return cpAgent;
+  }
+  const base =
+    process.platform === 'win32'
+      ? (process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'))
+      : path.join(os.homedir(), '.local', 'share');
+  return path.join(base, 'nexpanel-agent');
 }
 
 const runDir = path.join(dataDir(), 'run');
@@ -215,12 +232,55 @@ switch (command) {
       env: { ...process.env, DATABASE_URL: DB_URL },
       shell: process.platform === 'win32',
     });
+
+    try {
+      const { PrismaClient } = await import('@nexpanel/database');
+      const { newSecretToken, sha256Hex } = await import('@nexpanel/shared');
+      const prisma = new PrismaClient({ datasources: { db: { url: DB_URL } } });
+      const nodeCount = await prisma.node.count();
+      if (nodeCount === 0) {
+        const token = `npn_${newSecretToken(32)}`;
+        const localNode = await prisma.node.create({
+          data: {
+            name: `Local Server (${os.hostname()})`,
+            description: 'Primary host machine (auto-configured local node)',
+            tokenHash: sha256Hex(token),
+          },
+        });
+        const panelUrl = `http://127.0.0.1:${process.env.NEXPANEL_API_PORT ?? 4000}`;
+        const targetDirs = [agentDataDir()];
+        if (process.platform !== 'win32' && fs.existsSync('/home/chickenpanel')) {
+          targetDirs.push('/home/chickenpanel/.local/share/nexpanel-agent');
+        }
+        for (const dir of targetDirs) {
+          try {
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'agent.json'), JSON.stringify({ panelUrl, token }, null, 2), { mode: 0o600 });
+            if (process.platform !== 'win32' && process.getuid && process.getuid() === 0 && dir.startsWith('/home/chickenpanel')) {
+              try {
+                execFileSync('chown', ['-R', 'chickenpanel:chickenpanel', dir], { stdio: 'ignore' });
+              } catch {}
+            }
+          } catch {}
+        }
+        console.log(`Auto-configured local node "${localNode.name}".`);
+      }
+      await prisma.$disconnect();
+    } catch {
+      // ignore auto-provision failure
+    }
+
     console.log('Install complete. Run "chickenpanel start" next.');
     break;
   }
   case 'start': {
     const isEmbeddedDb = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes(':5490');
-    const defaultServices: ServiceName[] = isEmbeddedDb ? ['db', 'api', 'web'] : ['api', 'web'];
+    const hasAgent =
+      fs.existsSync(path.join(agentDataDir(), 'agent.json')) ||
+      fs.existsSync('/home/chickenpanel/.local/share/nexpanel-agent/agent.json');
+    const defaultServices: ServiceName[] = isEmbeddedDb
+      ? (hasAgent ? ['db', 'api', 'web', 'agent'] : ['db', 'api', 'web'])
+      : (hasAgent ? ['api', 'web', 'agent'] : ['api', 'web']);
     const servicesToStart = parseServices(arg1, defaultServices);
     if (servicesToStart.includes('db') && isEmbeddedDb && process.platform !== 'win32' && process.getuid && process.getuid() === 0) {
       console.error(
@@ -292,24 +352,43 @@ switch (command) {
     console.log('Update complete. Restart services with "chickenpanel restart".');
     break;
   }
+  case 'register':
   case 'node': {
-    if (arg1 !== 'register') {
-      console.error('Usage: chickenpanel node register <panel-url> <token>');
-      process.exit(1);
+    let panelUrl: string | undefined;
+    let token: string | undefined;
+
+    if (command === 'register') {
+      panelUrl = arg1;
+      token = process.argv[4];
+    } else {
+      if (arg1 !== 'register') {
+        console.error('Usage: chickenpanel node register <panel-url> <token>');
+        process.exit(1);
+      }
+      panelUrl = process.argv[4];
+      token = process.argv[5];
     }
-    const [, , , , panelUrl, token] = process.argv;
+
     if (!panelUrl || !token) {
       console.error('Usage: chickenpanel node register <panel-url> <token>');
       process.exit(1);
     }
-    const agentData =
-      process.env.NEXPANEL_AGENT_DATA ??
-      (process.platform === 'win32'
-        ? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'nexpanel-agent')
-        : path.join(os.homedir(), '.local', 'share', 'nexpanel-agent'));
-    fs.mkdirSync(agentData, { recursive: true });
-    fs.writeFileSync(path.join(agentData, 'agent.json'), JSON.stringify({ panelUrl, token }, null, 2), { mode: 0o600 });
-    console.log(`Agent configured (${path.join(agentData, 'agent.json')}).`);
+    const targetDirs = [agentDataDir()];
+    if (process.platform !== 'win32' && fs.existsSync('/home/chickenpanel')) {
+      targetDirs.push('/home/chickenpanel/.local/share/nexpanel-agent');
+    }
+    for (const agentData of targetDirs) {
+      try {
+        fs.mkdirSync(agentData, { recursive: true });
+        fs.writeFileSync(path.join(agentData, 'agent.json'), JSON.stringify({ panelUrl, token }, null, 2), { mode: 0o600 });
+        if (process.platform !== 'win32' && process.getuid && process.getuid() === 0 && agentData.startsWith('/home/chickenpanel')) {
+          try {
+            execFileSync('chown', ['-R', 'chickenpanel:chickenpanel', agentData], { stdio: 'ignore' });
+          } catch {}
+        }
+      } catch {}
+    }
+    console.log(`Agent configured (${path.join(agentDataDir(), 'agent.json')}).`);
     console.log('Start it with: chickenpanel start agent');
     break;
   }

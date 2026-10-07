@@ -7,7 +7,7 @@ import {
   type AgentCommand,
   type AgentMessage,
 } from '@nexpanel/shared';
-import { agentWsUrl, type AgentConfig } from './config.js';
+import { agentWsUrl, loadAgentConfig, type AgentConfig } from './config.js';
 import { collectMetrics, collectSystemInfo } from './sysinfo.js';
 import type { AppSupervisor } from './apps.js';
 import type { FileService } from './files.js';
@@ -62,6 +62,13 @@ export class AgentConnection {
 
   private connect(): void {
     if (this.closed) return;
+    try {
+      const fresh = loadAgentConfig();
+      (this.config as { panelUrl: string; token: string }).panelUrl = fresh.panelUrl;
+      (this.config as { panelUrl: string; token: string }).token = fresh.token;
+    } catch {
+      // retain in-memory config if disk read fails
+    }
     const url = agentWsUrl(this.config.panelUrl);
     console.log(`[agent] connecting to ${url}`);
     const ws = new WebSocket(url, { maxPayload: 128 * 1024 * 1024 });
