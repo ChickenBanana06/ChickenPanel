@@ -6,19 +6,23 @@ import { BackupService } from '../services/backup-service.js';
 import { writeAudit } from '../lib/audit.js';
 
 export async function taskRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  const { requirePermission, requireAuth } = makeAuthHooks(ctx);
+  const { requirePermission, requireAuth, requireTaskAccess } = makeAuthHooks(ctx);
 
   app.get('/', { preHandler: requireAuth }, async (req) => {
     const { status, limit } = req.query as { status?: string; limit?: string };
+    const isAdmin = req.authedUser!.role === 'ADMIN';
     const tasks = await ctx.db.task.findMany({
-      where: status ? { status } : undefined,
+      where: {
+        ...(status ? { status } : {}),
+        ...(isAdmin ? {} : { userId: req.authedUser!.id }),
+      },
       orderBy: { createdAt: 'desc' },
       take: Math.min(Number(limit ?? 50) || 50, 200),
     });
     return { tasks };
   });
 
-  app.get('/:id', { preHandler: requireAuth }, async (req) => {
+  app.get('/:id', { preHandler: requireTaskAccess() }, async (req) => {
     const { id } = req.params as { id: string };
     const task = await ctx.db.task.findUnique({ where: { id } });
     if (!task) throw ApiError.notFound('Task not found');
@@ -26,13 +30,13 @@ export async function taskRoutes(app: FastifyInstance, ctx: AppContext): Promise
     return { task, logs };
   });
 
-  app.post('/:id/cancel', { preHandler: requireAuth }, async (req) => {
+  app.post('/:id/cancel', { preHandler: requireTaskAccess() }, async (req) => {
     const { id } = req.params as { id: string };
     await ctx.tasks.cancel(id);
     return { ok: true };
   });
 
-  app.post('/:id/retry', { preHandler: requirePermission('server.create') }, async (req) => {
+  app.post('/:id/retry', { preHandler: requireTaskAccess('server.create') }, async (req) => {
     const { id } = req.params as { id: string };
     const task = await ctx.tasks.retry(id);
     if (!task) throw ApiError.badRequest('Task is not retryable');
@@ -42,9 +46,9 @@ export async function taskRoutes(app: FastifyInstance, ctx: AppContext): Promise
 
 export function backupRoutes(backups: BackupService) {
   return async function (app: FastifyInstance, ctx: AppContext): Promise<void> {
-    const { requirePermission } = makeAuthHooks(ctx);
+    const { requireAppAccess, requireBackupAccess } = makeAuthHooks(ctx);
 
-    app.get('/app/:appId', { preHandler: requirePermission('server.read') }, async (req) => {
+    app.get('/app/:appId', { preHandler: requireAppAccess('server.read', 'appId') }, async (req) => {
       const { appId } = req.params as { appId: string };
       const rows = await ctx.db.backup.findMany({ where: { applicationId: appId }, orderBy: { createdAt: 'desc' } });
       return {
@@ -56,14 +60,14 @@ export function backupRoutes(backups: BackupService) {
       };
     });
 
-    app.post('/app/:appId', { preHandler: requirePermission('backups.manage') }, async (req) => {
+    app.post('/app/:appId', { preHandler: requireAppAccess('backups.manage', 'appId') }, async (req) => {
       const { appId } = req.params as { appId: string };
       const { name } = req.body as { name?: string };
       const result = await backups.create(appId, name?.slice(0, 100) || `backup-${new Date().toISOString().slice(0, 16)}`, req.authedUser!.id);
       return { backupId: result.backup.id, taskId: result.taskId };
     });
 
-    app.post('/:backupId/restore', { preHandler: requirePermission('backups.manage') }, async (req) => {
+    app.post('/:backupId/restore', { preHandler: requireBackupAccess('backups.manage', 'backupId') }, async (req) => {
       const { backupId } = req.params as { backupId: string };
       const result = await backups.restore(backupId, req.authedUser!.id);
       await writeAudit(ctx.db, {
@@ -73,7 +77,7 @@ export function backupRoutes(backups: BackupService) {
       return result;
     });
 
-    app.delete('/:backupId', { preHandler: requirePermission('backups.manage') }, async (req) => {
+    app.delete('/:backupId', { preHandler: requireBackupAccess('backups.manage', 'backupId') }, async (req) => {
       const { backupId } = req.params as { backupId: string };
       const backup = await ctx.db.backup.findUnique({ where: { id: backupId }, include: { application: true } });
       if (!backup) throw ApiError.notFound('Backup not found');
@@ -156,8 +160,8 @@ export async function userRoutes(app: FastifyInstance, ctx: AppContext): Promise
     if (body.role && !['ADMIN', 'USER', 'VIEWER'].includes(body.role)) throw ApiError.badRequest('Invalid role');
     let passwordHash: string | undefined;
     if (body.password !== undefined) {
-      if (typeof body.password !== 'string' || body.password.length < 1 || body.password.length > 256) {
-        throw ApiError.badRequest('Password must be at least 1 character');
+      if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 256) {
+        throw ApiError.badRequest('Password must be at least 8 characters');
       }
       const { hashPassword } = await import('../lib/passwords.js');
       passwordHash = await hashPassword(body.password);
@@ -203,6 +207,46 @@ export async function realtimeWsRoute(app: FastifyInstance, ctx: AppContext): Pr
       socket.close(4401, 'unauthorized');
       return;
     }
-    ctx.realtime.register(socket as never, user.id);
+    ctx.realtime.register(socket as never, user.id, async (_subUserId, topic) => {
+      if (user.role === 'ADMIN') return true;
+
+      if (topic === 'apps') return user.permissions.has('server.read');
+      if (topic === 'nodes') return user.permissions.has('server.read');
+      if (topic.startsWith('node:')) return user.permissions.has('server.read');
+
+      if (topic.startsWith('app:')) {
+        if (topic.endsWith(':console')) {
+          if (!user.permissions.has('server.console')) return false;
+          const appId = topic.slice(4, -8);
+          const app = await ctx.db.application.findUnique({ where: { id: appId } });
+          return Boolean(app && app.createdById === user.id);
+        }
+        if (!user.permissions.has('server.read')) return false;
+        const appId = topic.slice(4);
+        const app = await ctx.db.application.findUnique({ where: { id: appId } });
+        return Boolean(app && app.createdById === user.id);
+      }
+
+      if (topic.startsWith('chat:')) {
+        if (!user.permissions.has('ai.use')) return false;
+        const convId = topic.slice(5);
+        const conv = await ctx.db.aIConversation.findUnique({ where: { id: convId } });
+        return Boolean(conv && conv.userId === user.id);
+      }
+
+      if (topic.startsWith('task:')) {
+        const taskId = topic.slice(5);
+        const task = await ctx.db.task.findUnique({ where: { id: taskId }, include: { application: true } });
+        if (!task) return false;
+        return task.userId === user.id || Boolean(task.application && task.application.createdById === user.id);
+      }
+
+      if (topic === 'tasks') {
+        // Global task feed is only for admins
+        return false;
+      }
+
+      return false;
+    });
   });
 }

@@ -27,9 +27,26 @@ export class BackupManager {
     const file = this.sandbox.backupFile(appId, backupId);
     await fs.access(file);
     const appRoot = this.sandbox.appRoot(appId);
-    await fs.rm(appRoot, { recursive: true, force: true });
-    await fs.mkdir(appRoot, { recursive: true });
-    await tar.x({ file, cwd: appRoot });
+    const realAppRoot = await fs.realpath(appRoot);
+    await tar.x({
+      file,
+      cwd: realAppRoot,
+      filter: (entryPath, entry) => {
+        if (path.isAbsolute(entryPath)) return false;
+        const target = path.resolve(realAppRoot, entryPath);
+        if (target !== realAppRoot && !target.startsWith(realAppRoot + path.sep)) {
+          return false;
+        }
+        const e = entry as { type?: string; linkpath?: string };
+        if (e.type === 'SymbolicLink' || e.type === 'Link') {
+          const linkTarget = path.resolve(path.dirname(target), e.linkpath ?? '');
+          if (linkTarget !== realAppRoot && !linkTarget.startsWith(realAppRoot + path.sep)) {
+            return false;
+          }
+        }
+        return true;
+      },
+    });
   }
 
   async delete(appId: string, backupId: string): Promise<void> {

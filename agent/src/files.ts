@@ -6,6 +6,7 @@ import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import type { FileEntry } from '@nexpanel/shared';
 import type { Sandbox } from './sandbox.js';
+import { safeFetch } from './ssrf.js';
 
 const MAX_DOWNLOAD_BYTES = 4 * 1024 * 1024 * 1024; // 4 GB
 const SEARCH_MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -144,7 +145,7 @@ export class FileService {
   async download(scopedId: string, url: string, dest: string, sha256?: string): Promise<{ sizeBytes: number }> {
     const target = this.sandbox.resolve(scopedId, dest);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const res = await fetch(url, { redirect: 'follow' });
+    const res = await safeFetch(url);
     if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) from ${url}`);
     const len = Number(res.headers.get('content-length') ?? 0);
     if (len > MAX_DOWNLOAD_BYTES) throw new Error('Download exceeds size limit');

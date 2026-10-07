@@ -107,8 +107,18 @@ export class NodeManager {
       return null;
     };
     if (msg.protocol !== AGENT_PROTOCOL_VERSION) return reject('protocol version mismatch');
-    const node = await this.db.node.findUnique({ where: { tokenHash: sha256Hex(msg.token) } });
+    if (typeof msg.token !== 'string' || msg.token.length < 20 || msg.token.length > 200) {
+      return reject('invalid node token');
+    }
+    const tokenHash = sha256Hex(msg.token);
+    const node = await this.db.node.findUnique({ where: { tokenHash } });
     if (!node) return reject('invalid node token');
+    const crypto = await import('node:crypto');
+    const nodeHashBuf = Buffer.from(node.tokenHash, 'hex');
+    const inputHashBuf = Buffer.from(tokenHash, 'hex');
+    if (nodeHashBuf.length !== inputHashBuf.length || !crypto.timingSafeEqual(nodeHashBuf, inputHashBuf)) {
+      return reject('invalid node token');
+    }
 
     const existing = this.agents.get(node.id);
     if (existing) existing.socket.close(4000, 'replaced by new connection');

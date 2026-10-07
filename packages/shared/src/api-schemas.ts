@@ -10,7 +10,7 @@ export const RegisterSchema = z.object({
     .max(32)
     .regex(/^[a-zA-Z0-9_.-]+$/, 'Username may contain letters, numbers, ., _ and -'),
   email: z.string().email(),
-  password: z.string().min(1).max(256),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(256),
 });
 
 export const LoginSchema = z.object({

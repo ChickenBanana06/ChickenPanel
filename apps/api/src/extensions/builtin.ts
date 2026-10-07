@@ -31,6 +31,21 @@ const GIT_URL = z
   .string()
   .url()
   .refine((u) => u.startsWith('https://'), 'Only https git URLs are allowed')
+  .refine((u) => {
+    try {
+      const parsed = new URL(u);
+      const host = parsed.hostname.toLowerCase();
+      if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
+        return false;
+      }
+      if (/^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(host)) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Git URL must not point to loopback, private, or internal hosts')
   .optional();
 
 function baseSpec(input: CreationInput, partial: Partial<AppRuntimeSpec>): AppRuntimeSpec {

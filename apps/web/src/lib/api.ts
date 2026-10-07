@@ -35,9 +35,13 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
 
 export const fetcher = <T,>(path: string): Promise<T> => api<T>('GET', path);
 
-/** Control-plane WebSocket URL. Uses the API port directly (cookies are port-agnostic). */
+/** Control-plane WebSocket URL. Uses direct API port when accessed via 3000, or same-origin when proxied. */
 export function realtimeUrl(): string {
+  if (typeof window === 'undefined') return '';
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const port = process.env.NEXT_PUBLIC_API_PORT ?? '4000';
-  return `${proto}://${window.location.hostname}:${port}/api/v1/realtime/ws`;
+  if (window.location.port === '3000') {
+    return `${proto}://${window.location.hostname}:${process.env.NEXT_PUBLIC_API_PORT ?? '4000'}/api/v1/realtime/ws`;
+  }
+  const portSuffix = window.location.port ? `:${window.location.port}` : '';
+  return `${proto}://${window.location.hostname}${portSuffix}/api/v1/realtime/ws`;
 }

@@ -324,7 +324,7 @@ export class AIService {
     const client = this.clientFor(conv.provider);
 
     // Resume: execute any tool calls persisted but not yet answered.
-    const resumed = await this.executePendingToolCalls(conv.id, conv.userId, permissions, run);
+    const resumed = await this.executePendingToolCalls(conv.id, conv.userId, conv.user.role, permissions, run);
     if (resumed === 'paused') return;
 
     await this.setState(conversationId, 'running');
@@ -427,7 +427,7 @@ export class AIService {
           },
         });
       }
-      const outcome = await this.executePendingToolCalls(conversationId, conv.userId, permissions, run);
+      const outcome = await this.executePendingToolCalls(conversationId, conv.userId, conv.user.role, permissions, run);
       if (outcome === 'paused') return;
     }
 
@@ -445,6 +445,7 @@ export class AIService {
   private async executePendingToolCalls(
     conversationId: string,
     userId: string,
+    role: string,
     permissions: Set<Permission>,
     run: ActiveRun,
   ): Promise<'continue' | 'paused'> {
@@ -526,6 +527,7 @@ export class AIService {
           ctx: this.ctx,
           conversationId,
           userId,
+          role,
           permissions,
           workspaceId: (await this.ctx.db.aIConversation.findUnique({ where: { id: conversationId } }))?.workspaceId ?? null,
           signal: run.abort.signal,

@@ -96,7 +96,7 @@ export class AgentConnection {
     const scheduleReconnect = () => {
       if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
       if (this.closed) return;
-      setTimeout(() => this.connect(), this.reconnectDelay).unref();
+      setTimeout(() => this.connect(), this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, RECONNECT_MAX_MS);
     };
     ws.on('close', scheduleReconnect);

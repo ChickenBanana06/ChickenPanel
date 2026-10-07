@@ -6,6 +6,7 @@ export interface ToolInvocationContext {
   ctx: AppContext;
   conversationId: string;
   userId: string;
+  role: string;
   /** Permissions of the conversation owner — enforced before execution. */
   permissions: Set<Permission>;
   /** Default workspace bound to the conversation, if any. */

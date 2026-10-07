@@ -60,3 +60,113 @@ test('path traversal blocked at the API layer helper', () => {
   assert.equal(safeRelativePath('a%2Fb'), 'a%2Fb'); // %2F elsewhere is just a literal file name
   assert.equal(safeRelativePath('plugins/../..'), null);
 });
+
+test('requireAppAccess blocks IDOR horizontal privilege escalation', async () => {
+  const { makeAuthHooks } = await import('../src/plugins/auth.js');
+  const mockCtx = {
+    config: { cookieName: 'session' },
+    db: {
+      application: {
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          if (where.id === 'app-alice') {
+            return { id: 'app-alice', createdById: 'user-alice' };
+          }
+          return null;
+        },
+      },
+    },
+  };
+  const hooks = makeAuthHooks(mockCtx as never);
+  const hook = hooks.requireAppAccess('server.read');
+
+  // Request by Bob (regular user) attempting to access Alice's app
+  const bobReq = {
+    authedUser: { id: 'user-bob', role: 'USER', permissions: new Set(['server.read']) },
+    method: 'GET',
+    headers: {},
+    params: { id: 'app-alice' },
+  };
+  await assert.rejects(async () => {
+    await hook(bobReq as never, {} as never);
+  }, (err: unknown) => {
+    assert.match(String(err), /Access denied/);
+    return true;
+  });
+
+  // Request by Alice (owner)
+  const aliceReq = {
+    authedUser: { id: 'user-alice', role: 'USER', permissions: new Set(['server.read']) },
+    method: 'GET',
+    headers: {},
+    params: { id: 'app-alice' },
+  };
+  await hook(aliceReq as never, {} as never); // Should succeed without throwing
+
+  // Request by Admin
+  const adminReq = {
+    authedUser: { id: 'user-admin', role: 'ADMIN', permissions: new Set(['server.read']) },
+    method: 'GET',
+    headers: {},
+    params: { id: 'app-alice' },
+  };
+  await hook(adminReq as never, {} as never); // Should succeed without throwing
+});
+
+test('requireTaskAccess blocks IDOR access to foreign tasks', async () => {
+  const { makeAuthHooks } = await import('../src/plugins/auth.js');
+  const mockCtx = {
+    config: { cookieName: 'session' },
+    db: {
+      task: {
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          if (where.id === 'task-alice') {
+            return { id: 'task-alice', userId: 'user-alice', application: null };
+          }
+          return null;
+        },
+      },
+    },
+  };
+  const hooks = makeAuthHooks(mockCtx as never);
+  const hook = hooks.requireTaskAccess();
+
+  const bobReq = {
+    authedUser: { id: 'user-bob', role: 'USER', permissions: new Set(['server.read']) },
+    method: 'GET',
+    headers: {},
+    params: { id: 'task-alice' },
+  };
+  await assert.rejects(async () => {
+    await hook(bobReq as never, {} as never);
+  }, /Access denied/);
+});
+
+test('requireBackupAccess blocks IDOR access to foreign backups', async () => {
+  const { makeAuthHooks } = await import('../src/plugins/auth.js');
+  const mockCtx = {
+    config: { cookieName: 'session' },
+    db: {
+      backup: {
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          if (where.id === 'backup-alice') {
+            return { id: 'backup-alice', application: { createdById: 'user-alice' } };
+          }
+          return null;
+        },
+      },
+    },
+  };
+  const hooks = makeAuthHooks(mockCtx as never);
+  const hook = hooks.requireBackupAccess('backups.manage');
+
+  const bobReq = {
+    authedUser: { id: 'user-bob', role: 'USER', permissions: new Set(['backups.manage']) },
+    method: 'GET',
+    headers: {},
+    params: { backupId: 'backup-alice' },
+  };
+  await assert.rejects(async () => {
+    await hook(bobReq as never, {} as never);
+  }, /Access denied/);
+});
+

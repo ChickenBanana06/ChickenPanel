@@ -4,6 +4,7 @@ import { newId } from '@nexpanel/shared';
 import type { Platform } from './platform/index.js';
 import type { Sandbox } from './sandbox.js';
 import { joinCommandLine } from './quote.js';
+import { sanitizeEnvironment } from './env.js';
 
 export interface ExecRequest {
   scopedId: string;
@@ -46,12 +47,27 @@ export class ExecService {
     const execId = newId('exec');
     const started = Date.now();
 
-    const commandLine = req.shell && req.command.length === 1 ? req.command[0]! : joinCommandLine(req.command, process.platform);
-    const shell = this.platform.shellCommand(commandLine);
+    let file: string;
+    let args: string[];
 
-    const child = spawn(shell.file, shell.args, {
+    if (!req.shell && req.command.length > 0) {
+      file = req.command[0]!;
+      args = req.command.slice(1);
+    } else {
+      const commandLine = req.shell && req.command.length === 1 ? req.command[0]! : joinCommandLine(req.command, process.platform);
+      const shell = this.platform.shellCommand(commandLine);
+      file = shell.file;
+      args = shell.args;
+    }
+
+    if (process.platform === 'linux' && fs.existsSync('/usr/bin/prlimit')) {
+      args = ['--nofile=2048', '--nproc=512', '--', file, ...args];
+      file = '/usr/bin/prlimit';
+    }
+
+    const child = spawn(file, args, {
       cwd,
-      env: { ...process.env, ...req.env },
+      env: sanitizeEnvironment(req.env),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
       windowsHide: true,

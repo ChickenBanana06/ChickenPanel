@@ -52,19 +52,55 @@ export class Sandbox {
   /**
    * Join a user-supplied relative path onto a sandbox root. Throws when the
    * path is absolute, traverses out, or contains unsafe segments. Defense in
-   * depth: sanitize the relative path AND verify the resolved result stays
-   * under the root.
+   * depth: sanitize the relative path, verify lexical containment, and ensure
+   * symlinks do not escape the real sandbox root.
    */
   resolve(scopedId: string, userPath: string): string {
-    const root = this.rootFor(scopedId);
-    if (userPath === '.' || userPath === '') return root;
+    const rawRoot = this.rootFor(scopedId);
+    fs.mkdirSync(rawRoot, { recursive: true });
+    const realRoot = fs.realpathSync(rawRoot);
+
+    if (userPath === '.' || userPath === '') return realRoot;
     const safe = safeRelativePath(userPath);
     if (safe === null) throw new Error(`Unsafe path rejected: ${userPath}`);
-    const resolved = path.resolve(root, safe);
-    const rootResolved = path.resolve(root);
-    if (resolved !== rootResolved && !resolved.startsWith(rootResolved + path.sep)) {
+
+    const resolved = path.resolve(realRoot, safe);
+    if (resolved !== realRoot && !resolved.startsWith(realRoot + path.sep)) {
       throw new Error(`Path escapes sandbox: ${userPath}`);
     }
+
+    // Defense against symlink escapes
+    try {
+      const lstat = fs.lstatSync(resolved, { throwIfNoEntry: false });
+      if (lstat) {
+        const real = fs.realpathSync(resolved);
+        if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+          throw new Error(`Symlink escapes sandbox: ${userPath}`);
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && (err as { code?: string }).code === 'ENOENT') {
+        // target doesn't exist yet
+      } else {
+        throw err;
+      }
+    }
+
+    // Verify existing ancestor directories do not escape via symlinks
+    let current = path.dirname(resolved);
+    while (current.length >= realRoot.length) {
+      if (fs.existsSync(current)) {
+        const realAncestor = fs.realpathSync(current);
+        if (realAncestor !== realRoot && !realAncestor.startsWith(realRoot + path.sep)) {
+          throw new Error(`Symlink escapes sandbox: ${userPath}`);
+        }
+        break;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+
     return resolved;
   }
 }

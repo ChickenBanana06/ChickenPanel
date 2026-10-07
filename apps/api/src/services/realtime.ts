@@ -2,6 +2,8 @@ import type { WebSocket } from 'ws';
 
 export type Topic = string;
 
+export type TopicAuthorizer = (userId: string, topic: string) => Promise<boolean> | boolean;
+
 interface Subscriber {
   socket: WebSocket;
   userId: string;
@@ -22,10 +24,10 @@ interface Subscriber {
 export class RealtimeHub {
   private subscribers = new Set<Subscriber>();
 
-  register(socket: WebSocket, userId: string): void {
+  register(socket: WebSocket, userId: string, authorizer?: TopicAuthorizer): void {
     const sub: Subscriber = { socket, userId, topics: new Set() };
     this.subscribers.add(sub);
-    socket.on('message', (raw: Buffer) => {
+    socket.on('message', async (raw: Buffer) => {
       let msg: unknown;
       try {
         msg = JSON.parse(raw.toString('utf8'));
@@ -34,8 +36,24 @@ export class RealtimeHub {
       }
       const m = msg as { op?: string; topic?: string };
       if (typeof m.topic !== 'string' || m.topic.length > 200) return;
-      if (m.op === 'sub') sub.topics.add(m.topic);
-      else if (m.op === 'unsub') sub.topics.delete(m.topic);
+      if (m.op === 'sub') {
+        if (authorizer) {
+          try {
+            const allowed = await authorizer(userId, m.topic);
+            if (!allowed) {
+              if (sub.socket.readyState === sub.socket.OPEN) {
+                sub.socket.send(JSON.stringify({ op: 'error', topic: m.topic, error: 'Subscription forbidden' }));
+              }
+              return;
+            }
+          } catch {
+            return;
+          }
+        }
+        sub.topics.add(m.topic);
+      } else if (m.op === 'unsub') {
+        sub.topics.delete(m.topic);
+      }
     });
     const cleanup = () => this.subscribers.delete(sub);
     socket.on('close', cleanup);

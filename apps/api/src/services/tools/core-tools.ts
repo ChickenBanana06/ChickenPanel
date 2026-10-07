@@ -9,19 +9,29 @@ const ScopeSchema = z.object({
   id: z.string().describe('The application id or workspace id'),
 });
 
+async function checkAppAccess(inv: ToolInvocationContext, appId: string) {
+  const app = await inv.ctx.db.application.findUnique({ where: { id: appId } });
+  if (!app) throw new ToolExecutionError(`Application not found: ${appId}`);
+  if (inv.role !== 'ADMIN' && app.createdById !== inv.userId) {
+    throw new ToolExecutionError('Application belongs to another user');
+  }
+  return app;
+}
+
 async function resolveScope(
   inv: ToolInvocationContext,
   scope: { kind: 'app' | 'workspace'; id: string },
 ): Promise<{ nodeId: string; agentScope: { kind: 'app' | 'workspace'; id: string } }> {
   const { ctx } = inv;
   if (scope.kind === 'app') {
-    const app = await ctx.db.application.findUnique({ where: { id: scope.id } });
-    if (!app) throw new ToolExecutionError(`Application not found: ${scope.id}`);
+    const app = await checkAppAccess(inv, scope.id);
     return { nodeId: app.nodeId, agentScope: scope };
   }
   const ws = await ctx.db.workspace.findUnique({ where: { id: scope.id } });
   if (!ws) throw new ToolExecutionError(`Workspace not found: ${scope.id}`);
-  if (ws.userId !== inv.userId) throw new ToolExecutionError('Workspace belongs to another user');
+  if (inv.role !== 'ADMIN' && ws.userId !== inv.userId) {
+    throw new ToolExecutionError('Workspace belongs to another user');
+  }
   return { nodeId: ws.nodeId, agentScope: scope };
 }
 
@@ -213,7 +223,10 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     argsSchema: z.object({ type: z.string().optional() }),
     execute: async (args, inv) => {
       const apps = await inv.ctx.db.application.findMany({
-        where: args.type ? { type: args.type } : undefined,
+        where: {
+          ...(args.type ? { type: args.type } : {}),
+          ...(inv.role !== 'ADMIN' ? { createdById: inv.userId } : {}),
+        },
         select: {
           id: true, name: true, type: true, status: true, nodeId: true, ports: true,
           restartPolicy: true, createdAt: true, lastMetrics: true,
@@ -235,6 +248,9 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
         include: { node: { select: { id: true, name: true, status: true, platform: true } } },
       });
       if (!app) throw new ToolExecutionError('Application not found');
+      if (inv.role !== 'ADMIN' && app.createdById !== inv.userId) {
+        throw new ToolExecutionError('Application belongs to another user');
+      }
       const { env: _env, ...rest } = app as Record<string, unknown>;
       return { application: rest, envKeys: Object.keys((app.env as Record<string, string>) ?? {}) };
     },
@@ -297,6 +313,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.start',
     argsSchema: z.object({ application_id: z.string() }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       await inv.ctx.apps.start(args.application_id);
       return { ok: true };
     },
@@ -308,6 +325,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.stop',
     argsSchema: z.object({ application_id: z.string() }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       await inv.ctx.apps.stop(args.application_id);
       return { ok: true };
     },
@@ -319,6 +337,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.start',
     argsSchema: z.object({ application_id: z.string() }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       await inv.ctx.apps.restart(args.application_id);
       return { ok: true };
     },
@@ -331,6 +350,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     dangerous: true,
     argsSchema: z.object({ application_id: z.string() }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       const taskId = await inv.ctx.apps.requestDelete(args.application_id, inv.userId);
       return { deleteTaskId: taskId };
     },
@@ -341,7 +361,10 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     description: 'Read the most recent console/log lines of an application.',
     permission: 'server.console',
     argsSchema: z.object({ application_id: z.string(), lines: z.number().int().min(1).max(1000).default(100) }),
-    execute: async (args, inv) => inv.ctx.apps.tailLogs(args.application_id, args.lines),
+    execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
+      return inv.ctx.apps.tailLogs(args.application_id, args.lines);
+    },
   });
 
   registry.register({
@@ -350,6 +373,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.console',
     argsSchema: z.object({ application_id: z.string(), command: z.string().min(1).max(2000) }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       await inv.ctx.apps.sendConsole(args.application_id, args.command);
       return { ok: true };
     },
@@ -367,8 +391,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
       args: z.record(z.unknown()).default({}),
     }),
     execute: async (args, inv) => {
-      const app = await inv.ctx.db.application.findUnique({ where: { id: args.application_id } });
-      if (!app) throw new ToolExecutionError('Application not found');
+      const app = await checkAppAccess(inv, args.application_id);
       const ext = inv.ctx.extensions.get(app.type);
       const action = ext?.actions?.find((a) => a.id === args.action);
       if (!action) throw new ToolExecutionError(`Unknown action ${args.action} for type ${app.type}`);
@@ -390,8 +413,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.read',
     argsSchema: z.object({ application_id: z.string() }),
     execute: async (args, inv) => {
-      const app = await inv.ctx.db.application.findUnique({ where: { id: args.application_id } });
-      if (!app) throw new ToolExecutionError('Application not found');
+      const app = await checkAppAccess(inv, args.application_id);
       const ext = inv.ctx.extensions.get(app.type);
       return {
         actions: (ext?.actions ?? []).map((a) => ({
@@ -411,6 +433,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'backups.manage',
     argsSchema: z.object({ application_id: z.string(), name: z.string().min(1).max(100) }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       const { backup, taskId } = await backups.create(args.application_id, args.name, inv.userId);
       return { backupId: backup.id, taskId };
     },
@@ -422,7 +445,17 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'backups.manage',
     dangerous: true,
     argsSchema: z.object({ backup_id: z.string() }),
-    execute: async (args, inv) => backups.restore(args.backup_id, inv.userId),
+    execute: async (args, inv) => {
+      const b = await inv.ctx.db.backup.findUnique({
+        where: { id: args.backup_id },
+        include: { application: true },
+      });
+      if (!b) throw new ToolExecutionError('Backup not found');
+      if (inv.role !== 'ADMIN' && b.application.createdById !== inv.userId) {
+        throw new ToolExecutionError('Backup belongs to another user');
+      }
+      return backups.restore(args.backup_id, inv.userId);
+    },
   });
 
   registry.register({
@@ -431,6 +464,7 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.read',
     argsSchema: z.object({ application_id: z.string() }),
     execute: async (args, inv) => {
+      await checkAppAccess(inv, args.application_id);
       const rows = await inv.ctx.db.backup.findMany({
         where: { applicationId: args.application_id },
         orderBy: { createdAt: 'desc' },
@@ -486,8 +520,15 @@ export function registerCoreTools(registry: ToolRegistry, backups: BackupService
     permission: 'server.read',
     argsSchema: z.object({ task_id: z.string() }),
     execute: async (args, inv) => {
-      const task = await inv.ctx.db.task.findUnique({ where: { id: args.task_id } });
+      const task = await inv.ctx.db.task.findUnique({
+        where: { id: args.task_id },
+        include: { application: true },
+      });
       if (!task) throw new ToolExecutionError('Task not found');
+      if (inv.role !== 'ADMIN') {
+        const isOwner = task.userId === inv.userId || (task.application && task.application.createdById === inv.userId);
+        if (!isOwner) throw new ToolExecutionError('Task belongs to another user');
+      }
       const logs = await inv.ctx.db.taskLog.findMany({
         where: { taskId: task.id },
         orderBy: { ts: 'desc' },

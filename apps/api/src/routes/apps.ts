@@ -16,10 +16,12 @@ function requirePath(input: unknown): string {
 }
 
 export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<void> {
-  const { requirePermission } = makeAuthHooks(ctx);
+  const { requirePermission, requireAppAccess } = makeAuthHooks(ctx);
 
-  app.get('/', { preHandler: requirePermission('server.read') }, async () => {
+  app.get('/', { preHandler: requirePermission('server.read') }, async (req) => {
+    const isAdmin = req.authedUser!.role === 'ADMIN';
     const apps = await ctx.db.application.findMany({
+      where: isAdmin ? undefined : { createdById: req.authedUser!.id },
       orderBy: { createdAt: 'desc' },
       include: { node: { select: { id: true, name: true, status: true } } },
     });
@@ -63,7 +65,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { application: { id: created.id, name: created.name, ports: created.ports }, taskId };
   });
 
-  app.get('/:id', { preHandler: requirePermission('server.read') }, async (req) => {
+  app.get('/:id', { preHandler: requireAppAccess('server.read') }, async (req) => {
     const { id } = req.params as { id: string };
     const a = await ctx.db.application.findUnique({
       where: { id },
@@ -80,7 +82,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     };
   });
 
-  app.patch('/:id', { preHandler: requirePermission('server.create') }, async (req) => {
+  app.patch('/:id', { preHandler: requireAppAccess('server.create') }, async (req) => {
     const { id } = req.params as { id: string };
     const body = UpdateApplicationSchema.parse(req.body);
     const existing = await ctx.apps.get(id);
@@ -110,7 +112,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     ['restart', 'server.start'],
     ['kill', 'server.stop'],
   ] as const) {
-    app.post(`/:id/${action}`, { preHandler: requirePermission(permission) }, async (req) => {
+    app.post(`/:id/${action}`, { preHandler: requireAppAccess(permission) }, async (req) => {
       const { id } = req.params as { id: string };
       try {
         await ctx.apps[action](id);
@@ -130,7 +132,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     });
   }
 
-  app.post('/:id/ports/allocate', { preHandler: requirePermission('server.create') }, async (req) => {
+  app.post('/:id/ports/allocate', { preHandler: requireAppAccess('server.create') }, async (req) => {
     const { id } = req.params as { id: string };
     const { port } = (req.body ?? {}) as { port?: number };
     const result = await ctx.apps.allocateExtraPort(id, port);
@@ -141,7 +143,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return result;
   });
 
-  app.delete('/:id/ports/:port', { preHandler: requirePermission('server.create') }, async (req) => {
+  app.delete('/:id/ports/:port', { preHandler: requireAppAccess('server.create') }, async (req) => {
     const { id, port: portStr } = req.params as { id: string; port: string };
     const port = Number(portStr);
     if (!port || Number.isNaN(port)) throw ApiError.badRequest('Invalid port');
@@ -153,7 +155,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { ok: true };
   });
 
-  app.delete('/:id', { preHandler: requirePermission('server.delete') }, async (req) => {
+  app.delete('/:id', { preHandler: requireAppAccess('server.delete') }, async (req) => {
     const { id } = req.params as { id: string };
     const taskId = await ctx.apps.requestDelete(id, req.authedUser!.id);
     await writeAudit(ctx.db, {
@@ -163,7 +165,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { taskId };
   });
 
-  app.post('/:id/console', { preHandler: requirePermission('server.console') }, async (req) => {
+  app.post('/:id/console', { preHandler: requireAppAccess('server.console') }, async (req) => {
     const { id } = req.params as { id: string };
     const { command } = req.body as { command?: string };
     if (!command || typeof command !== 'string' || command.length > 2000) {
@@ -177,7 +179,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { ok: true };
   });
 
-  app.get('/:id/logs', { preHandler: requirePermission('server.console') }, async (req) => {
+  app.get('/:id/logs', { preHandler: requireAppAccess('server.console') }, async (req) => {
     const { id } = req.params as { id: string };
     const { lines } = req.query as { lines?: string };
     return ctx.apps.tailLogs(id, Math.min(Number(lines ?? 200) || 200, 2000));
@@ -185,7 +187,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
 
   /* ---------------- File manager ---------------- */
 
-  app.get('/:id/files', { preHandler: requirePermission('files.read') }, async (req) => {
+  app.get('/:id/files', { preHandler: requireAppAccess('files.read') }, async (req) => {
     const { id } = req.params as { id: string };
     const { path } = req.query as { path?: string };
     const a = await ctx.apps.get(id);
@@ -196,7 +198,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     });
   });
 
-  app.get('/:id/files/content', { preHandler: requirePermission('files.read') }, async (req) => {
+  app.get('/:id/files/content', { preHandler: requireAppAccess('files.read') }, async (req) => {
     const { id } = req.params as { id: string };
     const { path } = req.query as { path?: string };
     const a = await ctx.apps.get(id);
@@ -208,7 +210,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     });
   });
 
-  app.put('/:id/files/content', { preHandler: requirePermission('files.write') }, async (req) => {
+  app.put('/:id/files/content', { preHandler: requireAppAccess('files.write') }, async (req) => {
     const { id } = req.params as { id: string };
     const body = FileWriteSchema.parse(req.body);
     const a = await ctx.apps.get(id);
@@ -226,7 +228,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { ok: true };
   });
 
-  app.post('/:id/files/mkdir', { preHandler: requirePermission('files.write') }, async (req) => {
+  app.post('/:id/files/mkdir', { preHandler: requireAppAccess('files.write') }, async (req) => {
     const { id } = req.params as { id: string };
     const { path } = req.body as { path?: string };
     const a = await ctx.apps.get(id);
@@ -234,7 +236,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { ok: true };
   });
 
-  app.post('/:id/files/rename', { preHandler: requirePermission('files.write') }, async (req) => {
+  app.post('/:id/files/rename', { preHandler: requireAppAccess('files.write') }, async (req) => {
     const { id } = req.params as { id: string };
     const { from, to } = req.body as { from?: string; to?: string };
     const a = await ctx.apps.get(id);
@@ -242,7 +244,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { ok: true };
   });
 
-  app.post('/:id/files/delete', { preHandler: requirePermission('files.write') }, async (req) => {
+  app.post('/:id/files/delete', { preHandler: requireAppAccess('files.write') }, async (req) => {
     const { id } = req.params as { id: string };
     const { path } = req.body as { path?: string };
     const a = await ctx.apps.get(id);
@@ -254,7 +256,7 @@ export async function appRoutes(app: FastifyInstance, ctx: AppContext): Promise<
     return { ok: true };
   });
 
-  app.get('/:id/files/search', { preHandler: requirePermission('files.read') }, async (req) => {
+  app.get('/:id/files/search', { preHandler: requireAppAccess('files.read') }, async (req) => {
     const { id } = req.params as { id: string };
     const { query, path } = req.query as { query?: string; path?: string };
     if (!query) throw ApiError.badRequest('query required');

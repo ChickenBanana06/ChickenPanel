@@ -77,9 +77,15 @@ export async function nodeRoutes(app: FastifyInstance, ctx: AppContext): Promise
 
   app.get('/:id', { preHandler: requirePermission('server.read') }, async (req) => {
     const { id } = req.params as { id: string };
+    const isAdmin = req.authedUser!.role === 'ADMIN';
     const node = await ctx.db.node.findUnique({
       where: { id },
-      include: { applications: { select: { id: true, name: true, type: true, status: true, ports: true } } },
+      include: {
+        applications: {
+          where: isAdmin ? undefined : { createdById: req.authedUser!.id },
+          select: { id: true, name: true, type: true, status: true, ports: true },
+        },
+      },
     });
     if (!node) throw ApiError.notFound('Node not found');
     const { tokenHash: _t, ...rest } = node;

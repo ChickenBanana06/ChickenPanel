@@ -7,6 +7,7 @@ import type { AppRuntimeSpec, AppStatus, AppMetrics } from '@nexpanel/shared';
 import type { Platform } from './platform/index.js';
 import type { Sandbox } from './sandbox.js';
 import { joinCommandLine } from './quote.js';
+import { sanitizeEnvironment } from './env.js';
 
 const LOG_BUFFER_LINES = 1000;
 const RESTART_BACKOFF_MS = [2000, 5000, 10000, 30000, 60000];
@@ -15,9 +16,11 @@ const CRASH_WINDOW_MS = 10 * 60 * 1000;
 function tryOpenFirewallPorts(ports: number[]): void {
   if (process.platform !== 'linux' || !ports || ports.length === 0) return;
   for (const port of ports) {
-    exec(`sudo ufw allow ${port} || ufw allow ${port}`, (err) => {
+    const validPort = Math.floor(Number(port));
+    if (!Number.isFinite(validPort) || validPort < 1 || validPort > 65535) continue;
+    exec(`sudo ufw allow ${validPort} || ufw allow ${validPort}`, (err) => {
       if (err) {
-        exec(`sudo firewall-cmd --add-port=${port}/tcp --add-port=${port}/udp --permanent && sudo firewall-cmd --reload`, () => {});
+        exec(`sudo firewall-cmd --add-port=${validPort}/tcp --add-port=${validPort}/udp --permanent && sudo firewall-cmd --reload`, () => {});
       }
     });
   }
@@ -162,16 +165,36 @@ export class AppSupervisor {
     tryOpenFirewallPorts(spec.ports ?? []);
 
     this.events.onStatus(appId, 'starting');
-    const commandLine = joinCommandLine(spec.startCommand, process.platform);
-    const shell = this.platform.shellCommand(commandLine);
+    let file: string;
+    let args: string[];
 
-    const child = spawn(shell.file, shell.args, {
+    if (spec.startCommand.length === 1 && /[\s|><&;]/.test(spec.startCommand[0]!)) {
+      const shell = this.platform.shellCommand(spec.startCommand[0]!);
+      file = shell.file;
+      args = shell.args;
+    } else if (spec.startCommand.length > 0) {
+      file = spec.startCommand[0]!;
+      args = spec.startCommand.slice(1);
+    } else {
+      file = 'echo';
+      args = ['No start command configured'];
+    }
+
+    if (process.platform === 'linux' && fs.existsSync('/usr/bin/prlimit')) {
+      const prlimitArgs = ['--nofile=4096', '--nproc=1024'];
+      if (spec.limits?.memoryMb) {
+        prlimitArgs.push(`--as=${spec.limits.memoryMb * 1024 * 1024 * 2}`);
+      }
+      args = [...prlimitArgs, '--', file, ...args];
+      file = '/usr/bin/prlimit';
+    }
+
+    const child = spawn(file, args, {
       cwd,
-      env: { ...process.env, ...spec.env },
+      env: sanitizeEnvironment(spec.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
       windowsHide: true,
-      // The command line is already quoted for cmd.exe — prevent Node's re-quoting.
       windowsVerbatimArguments: process.platform === 'win32',
     });
 

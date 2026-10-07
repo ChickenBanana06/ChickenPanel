@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import * as tar from 'tar';
 import type { AppRuntimeSpec, ProvisionStep } from '@nexpanel/shared';
 import type { Sandbox } from './sandbox.js';
@@ -49,11 +50,43 @@ export class Provisioner {
           const archive = this.sandbox.resolve(appId, step.archive);
           const dest = this.sandbox.resolve(appId, step.dest);
           await fs.mkdir(dest, { recursive: true });
+          const realDest = await fs.realpath(dest);
           if (/\.zip$/i.test(step.archive)) {
             const AdmZip = (await import('adm-zip')).default;
-            new AdmZip(archive).extractAllTo(dest, true);
+            const zip = new AdmZip(archive);
+            for (const entry of zip.getEntries()) {
+              const entryName = entry.entryName;
+              const target = path.resolve(realDest, entryName);
+              if (target !== realDest && !target.startsWith(realDest + path.sep)) {
+                throw new Error(`Zip entry escapes extraction directory: ${entryName}`);
+              }
+              if (entry.isDirectory) {
+                await fs.mkdir(target, { recursive: true });
+              } else {
+                await fs.mkdir(path.dirname(target), { recursive: true });
+                await fs.writeFile(target, entry.getData());
+              }
+            }
           } else if (/\.(tgz|tar\.gz|tar)$/i.test(step.archive)) {
-            await tar.x({ file: archive, cwd: dest });
+            await tar.x({
+              file: archive,
+              cwd: realDest,
+              filter: (entryPath, entry) => {
+                if (path.isAbsolute(entryPath)) return false;
+                const target = path.resolve(realDest, entryPath);
+                if (target !== realDest && !target.startsWith(realDest + path.sep)) {
+                  return false;
+                }
+                const e = entry as { type?: string; linkpath?: string };
+                if (e.type === 'SymbolicLink' || e.type === 'Link') {
+                  const linkTarget = path.resolve(path.dirname(target), e.linkpath ?? '');
+                  if (linkTarget !== realDest && !linkTarget.startsWith(realDest + path.sep)) {
+                    return false;
+                  }
+                }
+                return true;
+              },
+            });
           } else {
             throw new Error('Only .tar/.tar.gz/.tgz/.zip archives are supported');
           }

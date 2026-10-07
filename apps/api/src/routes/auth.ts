@@ -89,8 +89,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext): Promise
   app.post('/change-password', { preHandler: requireAuth, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
     const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
     if (!currentPassword || !newPassword) throw ApiError.badRequest('currentPassword and newPassword required');
-    if (newPassword.length < 1 || newPassword.length > 256) {
-      throw ApiError.badRequest('New password must be at least 1 character');
+    if (newPassword.length < 8 || newPassword.length > 256) {
+      throw ApiError.badRequest('New password must be at least 8 characters');
     }
     const authed = req.authedUser!;
     const user = await ctx.db.user.findUnique({ where: { id: authed.id } });

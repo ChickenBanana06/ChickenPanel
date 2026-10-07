@@ -76,5 +76,61 @@ export function makeAuthHooks(ctx: AppContext) {
     };
   }
 
-  return { attachUser, requireAuth, requirePermission };
+  function requireAppAccess(perm: Permission, paramName = 'id') {
+    return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      await requirePermission(perm)(req, reply);
+      const params = (req.params ?? {}) as Record<string, string>;
+      const appId = params[paramName];
+      if (!appId) throw ApiError.badRequest('Application ID required');
+      const app = await ctx.db.application.findUnique({ where: { id: appId } });
+      if (!app) throw ApiError.notFound('Application not found');
+      if (req.authedUser!.role !== 'ADMIN' && app.createdById !== req.authedUser!.id) {
+        throw ApiError.forbidden('Access denied to this application');
+      }
+    };
+  }
+
+  function requireTaskAccess(perm?: Permission, paramName = 'id') {
+    return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      if (perm) {
+        await requirePermission(perm)(req, reply);
+      } else {
+        await requireAuth(req, reply);
+      }
+      const params = (req.params ?? {}) as Record<string, string>;
+      const taskId = params[paramName];
+      if (!taskId) throw ApiError.badRequest('Task ID required');
+      const task = await ctx.db.task.findUnique({
+        where: { id: taskId },
+        include: { application: true },
+      });
+      if (!task) throw ApiError.notFound('Task not found');
+      if (req.authedUser!.role !== 'ADMIN') {
+        const isOwner = task.userId === req.authedUser!.id || (task.application && task.application.createdById === req.authedUser!.id);
+        if (!isOwner) throw ApiError.forbidden('Access denied to this task');
+      }
+    };
+  }
+
+  function requireBackupAccess(perm: Permission, paramName = 'backupId') {
+    return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      await requirePermission(perm)(req, reply);
+      const params = (req.params ?? {}) as Record<string, string>;
+      const backupId = params[paramName];
+      if (!backupId) throw ApiError.badRequest('Backup ID required');
+      const backup = await ctx.db.backup.findUnique({
+        where: { id: backupId },
+        include: { application: true },
+      });
+      if (!backup) throw ApiError.notFound('Backup not found');
+      if (req.authedUser!.role !== 'ADMIN') {
+        if (backup.application.createdById !== req.authedUser!.id) {
+          throw ApiError.forbidden('Access denied to this backup');
+        }
+      }
+    };
+  }
+
+  return { attachUser, requireAuth, requirePermission, requireAppAccess, requireTaskAccess, requireBackupAccess };
 }
+
