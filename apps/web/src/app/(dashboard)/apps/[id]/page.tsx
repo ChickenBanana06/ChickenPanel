@@ -3,10 +3,16 @@
 import { use, useEffect, useRef, useState, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import { Play, Square, RotateCw, Skull, Trash2, Folder, FileText, ArrowLeft, Download, FolderPlus, Pencil, Copy, Eye, EyeOff, Upload } from 'lucide-react';
+import {
+  Play, Square, RotateCw, Skull, Trash2, Folder, FileText, ArrowLeft, Download,
+  FolderPlus, Pencil, Copy, Eye, EyeOff, Upload, Users, Sliders, Crown, UserX, Save
+} from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
-import { Button, Card, EmptyState, Field, Input, Modal, Spinner, StatusBadge, cx, useToast, ProgressBar } from '@/components/ui';
+import {
+  Button, Card, EmptyState, Field, Input, Select, Modal, ConfirmDialog, Spinner,
+  StatusBadge, cx, useToast, ProgressBar
+} from '@/components/ui';
 
 interface AppDetail {
   id: string; name: string; type: string; status: string;
@@ -22,9 +28,12 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
   const toast = useToast();
   const { data, mutate } = useSWR<{ application: AppDetail }>(`/apps/${id}`, fetcher);
   const app = data?.application;
-  const [tab, setTab] = useState<'console' | 'files' | 'settings' | 'backups' | 'connection'>('console');
+  const [tab, setTab] = useState<'console' | 'players' | 'config' | 'files' | 'settings' | 'backups' | 'connection'>('console');
   const [busy, setBusy] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const isDatabase = ['redis', 'postgres', 'mysql'].includes(app?.type ?? '');
+  const isMinecraft = app?.type === 'minecraft';
   const didInitTab = useRef(false);
 
   useEffect(() => {
@@ -54,9 +63,21 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
     }
   }
 
+  const tabs: { id: typeof tab; label: string }[] = [
+    ...(isDatabase ? [{ id: 'connection' as const, label: 'Connection' }] : []),
+    { id: 'console' as const, label: 'Console' },
+    ...(isMinecraft ? [
+      { id: 'players' as const, label: 'Players' },
+      { id: 'config' as const, label: 'Server Config' },
+    ] : []),
+    { id: 'files' as const, label: 'Files' },
+    { id: 'settings' as const, label: 'Settings' },
+    { id: 'backups' as const, label: 'Backups' },
+  ];
+
   return (
     <div className="space-y-4 max-w-5xl">
-      <button className="text-xs text-dim hover:text-ink flex items-center gap-1" onClick={() => router.push('/apps')}>
+      <button className="text-xs text-dim hover:text-ink flex items-center gap-1 cursor-pointer" onClick={() => router.push('/apps')}>
         <ArrowLeft size={12} /> All applications
       </button>
       <div className="flex items-center gap-3 flex-wrap">
@@ -89,16 +110,7 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
             size="sm"
             variant="danger"
             title="Delete application"
-            onClick={async () => {
-              if (!window.confirm(`Delete "${app.name}" and all its files permanently?`)) return;
-              try {
-                await api('DELETE', `/apps/${id}`);
-                toast('info', 'Deletion started');
-                router.push('/apps');
-              } catch (err) {
-                toast('error', err instanceof Error ? err.message : 'Delete failed');
-              }
-            }}
+            onClick={() => setShowDeleteConfirm(true)}
           >
             <Trash2 size={13} />
           </Button>
@@ -106,22 +118,16 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
       </div>
 
       <div className="flex gap-1 border-b border-edge">
-        {([...(isDatabase ? ['connection'] : []), 'console', 'files', 'settings', 'backups'] as (
-          | 'console'
-          | 'files'
-          | 'settings'
-          | 'backups'
-          | 'connection'
-        )[]).map((t) => (
+        {tabs.map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.id}
+            onClick={() => setTab(t.id)}
             className={cx(
-              'px-3.5 py-2 text-sm capitalize border-b-2 -mb-px transition-colors',
-              tab === t ? 'border-accent text-accent font-medium' : 'border-transparent text-dim hover:text-ink',
+              'px-3.5 py-2 text-sm capitalize border-b-2 -mb-px transition-colors cursor-pointer',
+              tab === t.id ? 'border-accent text-accent font-medium' : 'border-transparent text-dim hover:text-ink',
             )}
           >
-            {t}
+            {t.label}
           </button>
         ))}
       </div>
@@ -130,9 +136,34 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
       {tab === 'console' && (
         <ConsoleTab appId={id} running={app.status === 'running'} isMinecraft={app.type === 'minecraft'} />
       )}
+      {tab === 'players' && <PlayersTab appId={id} running={app.status === 'running'} />}
+      {tab === 'config' && <MinecraftConfigTab appId={id} />}
       {tab === 'files' && <FilesTab appId={id} />}
       {tab === 'settings' && <SettingsTab app={app} onSaved={() => void mutate()} />}
       {tab === 'backups' && <BackupsTab appId={id} />}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={async () => {
+          setDeleting(true);
+          try {
+            await api('DELETE', `/apps/${id}`);
+            toast('info', 'Deletion started');
+            router.push('/apps');
+          } catch (err) {
+            toast('error', err instanceof Error ? err.message : 'Delete failed');
+          } finally {
+            setDeleting(false);
+            setShowDeleteConfirm(false);
+          }
+        }}
+        title={`Delete "${app.name}"?`}
+        message={`Are you sure you want to permanently delete "${app.name}" and all of its files, world data, and configuration? This action cannot be undone.`}
+        confirmText="Permanently Delete Server"
+        danger
+        busy={deleting}
+      />
     </div>
   );
 }
@@ -830,6 +861,290 @@ function BackupsTab({ appId }: { appId: string }) {
           ))}
         </div>
       )}
+    </Card>
+  );
+}
+
+/* ---------------- Minecraft Players Tab ---------------- */
+
+function PlayersTab({ appId, running }: { appId: string; running: boolean }) {
+  const toast = useToast();
+  const [players, setPlayers] = useState<{ name: string; isOp?: boolean; whitelisted?: boolean; online?: boolean }[]>([
+    { name: 'Admin', isOp: true, whitelisted: true, online: running },
+  ]);
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function executeCommand(cmd: string) {
+    setBusy(true);
+    try {
+      await api('POST', `/apps/${appId}/console`, { command: cmd });
+      toast('success', `Sent: /${cmd}`);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Command failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addPlayer(type: 'whitelist' | 'op') {
+    if (!newPlayerName.trim()) return;
+    const name = newPlayerName.trim();
+    if (!players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+      setPlayers((prev) => [...prev, { name, isOp: type === 'op', whitelisted: true, online: false }]);
+    }
+    if (type === 'whitelist') void executeCommand(`whitelist add ${name}`);
+    if (type === 'op') void executeCommand(`op ${name}`);
+    setNewPlayerName('');
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 mc-card space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
+              <Users size={16} className="text-emerald-400" />
+              <span>Player Management & Whitelist</span>
+            </h2>
+            <p className="text-xs text-dim">
+              Manage operators, whitelist, kicks, and bans directly through the server console.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="default"
+            disabled={!running || busy}
+            onClick={() => void executeCommand('list')}
+          >
+            Refresh (/list)
+          </Button>
+        </div>
+
+        <div className="flex gap-2">
+          <Input
+            value={newPlayerName}
+            onChange={(e) => setNewPlayerName(e.target.value)}
+            placeholder="Minecraft username (e.g. Notch, Steve)..."
+            className="flex-1 text-xs"
+          />
+          <Button
+            size="sm"
+            variant="default"
+            disabled={!newPlayerName.trim() || busy}
+            onClick={() => addPlayer('whitelist')}
+          >
+            Whitelist
+          </Button>
+          <Button
+            size="sm"
+            variant="diamond"
+            disabled={!newPlayerName.trim() || busy}
+            onClick={() => addPlayer('op')}
+          >
+            Grant OP
+          </Button>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {players.map((p) => (
+          <Card key={p.name} className="p-3.5 mc-card flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`https://mc-heads.net/avatar/${p.name}/44`}
+                alt={p.name}
+                className="w-10 h-10 rounded-lg bg-raised border border-edge shadow-sm shrink-0"
+              />
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-ink truncate">{p.name}</div>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  {p.isOp && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                      OP
+                    </span>
+                  )}
+                  {p.whitelisted && (
+                    <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                      Whitelisted
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button
+                size="xs"
+                variant="default"
+                title={p.isOp ? 'Revoke OP' : 'Grant OP'}
+                disabled={!running || busy}
+                onClick={() => {
+                  void executeCommand(p.isOp ? `deop ${p.name}` : `op ${p.name}`);
+                  setPlayers((prev) => prev.map((pl) => (pl.name === p.name ? { ...pl, isOp: !pl.isOp } : pl)));
+                }}
+              >
+                <Crown size={12} className={p.isOp ? 'text-amber-400' : 'text-faint'} />
+              </Button>
+              <Button
+                size="xs"
+                variant="danger"
+                title="Kick Player"
+                disabled={!running || busy}
+                onClick={() => void executeCommand(`kick ${p.name} Kicked by server administrator`)}
+              >
+                <UserX size={12} />
+              </Button>
+              <Button
+                size="xs"
+                variant="danger"
+                title="Ban Player"
+                disabled={!running || busy}
+                onClick={() => {
+                  if (window.confirm(`Ban player "${p.name}"?`)) {
+                    void executeCommand(`ban ${p.name} Banned by server administrator`);
+                  }
+                }}
+              >
+                Ban
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Minecraft Server Properties Editor ---------------- */
+
+function MinecraftConfigTab({ appId }: { appId: string }) {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [propsMap, setPropsMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ content: string }>('GET', `/apps/${appId}/files/content?path=server.properties`)
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const line of (res.content ?? '').split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+          const idx = trimmed.indexOf('=');
+          map[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+        }
+        setPropsMap(map);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appId]);
+
+  async function saveProps() {
+    setSaving(true);
+    try {
+      const lines = Object.entries(propsMap).map(([k, v]) => `${k}=${v}`);
+      const content = `# Minecraft server properties (Managed by ChickenPanel)\n${lines.join('\n')}\n`;
+      await api('PUT', `/apps/${appId}/files/content`, { path: 'server.properties', content });
+      toast('success', 'server.properties saved! Restart the server to apply changes.');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function update(k: string, v: string) {
+    setPropsMap((prev) => ({ ...prev, [k]: v }));
+  }
+
+  if (loading) {
+    return <div className="py-12 text-center"><Spinner /></div>;
+  }
+
+  return (
+    <Card className="p-5 mc-card space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-edge gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
+            <Sliders size={16} className="text-emerald-400" />
+            <span>Minecraft Server Properties (`server.properties`)</span>
+          </h2>
+          <p className="text-xs text-dim">
+            Fine-tune core Minecraft server mechanics, view distance, MOTD, and player rules.
+          </p>
+        </div>
+        <Button variant="primary" size="sm" disabled={saving} onClick={() => void saveProps()}>
+          <Save size={13} />
+          <span>{saving ? 'Saving...' : 'Save Configuration'}</span>
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <Field label="Server MOTD (Message of the Day)">
+          <Input value={propsMap['motd'] ?? ''} onChange={(e) => update('motd', e.target.value)} />
+        </Field>
+        <Field label="Gamemode">
+          <Select value={propsMap['gamemode'] ?? 'survival'} onChange={(e) => update('gamemode', e.target.value)}>
+            {['survival', 'creative', 'adventure', 'spectator'].map((g) => <option key={g} value={g}>{g}</option>)}
+          </Select>
+        </Field>
+        <Field label="Difficulty">
+          <Select value={propsMap['difficulty'] ?? 'normal'} onChange={(e) => update('difficulty', e.target.value)}>
+            {['peaceful', 'easy', 'normal', 'hard'].map((d) => <option key={d} value={d}>{d}</option>)}
+          </Select>
+        </Field>
+        <Field label="Max Players">
+          <Input type="number" min={1} max={1000} value={propsMap['max-players'] ?? '20'} onChange={(e) => update('max-players', e.target.value)} />
+        </Field>
+        <Field label="View Distance (Chunks)">
+          <Input type="number" min={2} max={32} value={propsMap['view-distance'] ?? '10'} onChange={(e) => update('view-distance', e.target.value)} />
+        </Field>
+        <Field label="Simulation Distance (Chunks)">
+          <Input type="number" min={2} max={32} value={propsMap['simulation-distance'] ?? '8'} onChange={(e) => update('simulation-distance', e.target.value)} />
+        </Field>
+        <Field label="PVP Enabled">
+          <Select value={propsMap['pvp'] ?? 'true'} onChange={(e) => update('pvp', e.target.value)}>
+            <option value="true">Enabled (True)</option>
+            <option value="false">Disabled (False)</option>
+          </Select>
+        </Field>
+        <Field label="Online Mode (Mojang Authentication)">
+          <Select value={propsMap['online-mode'] ?? 'true'} onChange={(e) => update('online-mode', e.target.value)}>
+            <option value="true">Enabled (Official accounts only)</option>
+            <option value="false">Disabled (Offline / cracked mode)</option>
+          </Select>
+        </Field>
+        <Field label="Whitelist">
+          <Select value={propsMap['white-list'] ?? 'false'} onChange={(e) => update('white-list', e.target.value)}>
+            <option value="false">Disabled</option>
+            <option value="true">Enforced</option>
+          </Select>
+        </Field>
+        <Field label="Hardcore Mode">
+          <Select value={propsMap['hardcore'] ?? 'false'} onChange={(e) => update('hardcore', e.target.value)}>
+            <option value="false">Disabled</option>
+            <option value="true">Enabled (Permadeath)</option>
+          </Select>
+        </Field>
+        <Field label="Spawn Protection Radius">
+          <Input type="number" min={0} value={propsMap['spawn-protection'] ?? '16'} onChange={(e) => update('spawn-protection', e.target.value)} />
+        </Field>
+        <Field label="Allow Flight">
+          <Select value={propsMap['allow-flight'] ?? 'false'} onChange={(e) => update('allow-flight', e.target.value)}>
+            <option value="false">Disabled</option>
+            <option value="true">Enabled</option>
+          </Select>
+        </Field>
+      </div>
     </Card>
   );
 }

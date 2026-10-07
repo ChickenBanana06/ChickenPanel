@@ -374,9 +374,38 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
     <>
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {messages.length === 0 && !streamText && (
-          <p className="text-xs text-faint text-center mt-8">
-            Ask the AI to create servers, write plugins, deploy bots, manage files…
-          </p>
+          <div className="space-y-4 my-6 px-1">
+            <div className="text-center space-y-1">
+              <div className="w-10 h-10 rounded-xl bg-accent/15 border border-accent/30 grid place-items-center text-accent mx-auto text-lg shadow-sm">
+                🐤
+              </div>
+              <h3 className="text-sm font-bold text-ink">Cluck AI Server Engineer</h3>
+              <p className="text-xs text-dim">
+                Ask questions, troubleshoot crashes, edit configs, or deploy servers.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 pt-2">
+              <div className="text-[10px] uppercase font-bold text-faint tracking-wider px-1">
+                Quick Prompts
+              </div>
+              {[
+                '🔍 Diagnose recent server logs or crashes',
+                '🚀 Optimize JVM flags for a 4GB Paper server',
+                '🛡️ Audit server security and open ports',
+                '📦 How do I configure a Velocity proxy network?',
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setInput(suggestion.slice(3))}
+                  className="w-full text-left p-2 rounded-lg bg-raised hover:bg-hover border border-edge text-xs text-dim hover:text-ink transition-colors cursor-pointer"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {messages.map((m) => (
           <MessageView key={m.id} message={m} convId={convId} onAction={refetch} />
@@ -517,10 +546,32 @@ function ToolCallChip({
         {statusIcon}
       </button>
       {part.status === 'awaiting_approval' && (
-        <div className="px-2.5 pb-2 flex items-center gap-2">
-          <span className="text-warn flex-1">Approval required</span>
-          <Button size="sm" variant="success" onClick={() => approve(true)}>Allow</Button>
-          <Button size="sm" variant="danger" onClick={() => approve(false)}>Deny</Button>
+        <div className="p-3 bg-red-950/25 border-t border-bad/30 space-y-2.5">
+          <div className="flex items-start gap-2 text-bad">
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold text-xs uppercase tracking-wide">
+                Security Approval Required
+              </div>
+              <p className="text-[11px] text-dim mt-0.5">
+                The AI operator is requesting to perform a restricted action: <code className="text-ink font-bold font-mono px-1 py-0.2 rounded bg-raised border border-edge">{part.name}</code>.
+              </p>
+            </div>
+          </div>
+          <div className="bg-bg/90 rounded-lg p-2.5 border border-edge text-[11px] space-y-1">
+            <span className="text-faint block font-semibold uppercase text-[10px]">Parameters:</span>
+            <pre className="console-font text-[10px] text-amber-200/90 overflow-x-auto max-h-32">
+              {JSON.stringify(part.args, null, 2)}
+            </pre>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button size="sm" variant="danger" onClick={() => approve(false)}>
+              Deny
+            </Button>
+            <Button size="sm" variant="success" onClick={() => approve(true)}>
+              Authorize Action
+            </Button>
+          </div>
         </div>
       )}
       {open && (

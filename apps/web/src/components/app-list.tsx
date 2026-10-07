@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { Plus } from 'lucide-react';
@@ -22,17 +22,36 @@ interface McCatalog {
 export function AppList({ typeFilter, title, createTypes }: { typeFilter?: string[]; title: string; createTypes?: string[] }) {
   const { data, mutate } = useSWR<{ applications: AppRow[] }>('/apps', fetcher);
   const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState('');
   useRealtimeTopic('apps', () => void mutate());
 
-  const apps = (data?.applications ?? []).filter((a) => !typeFilter || typeFilter.includes(a.type));
+  const allApps = (data?.applications ?? []).filter((a) => !typeFilter || typeFilter.includes(a.type));
+  const apps = allApps.filter((a) =>
+    !search ||
+    a.name.toLowerCase().includes(search.toLowerCase()) ||
+    a.type.toLowerCase().includes(search.toLowerCase()) ||
+    a.node?.name.toLowerCase().includes(search.toLowerCase()) ||
+    a.ports.some((p) => String(p).includes(search)),
+  );
 
   return (
     <div className="space-y-4 max-w-5xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h1 className="text-lg font-semibold">{title}</h1>
-        <Button variant="primary" onClick={() => setShowCreate(true)}>
-          <span className="flex items-center gap-1.5"><Plus size={14} /> Create</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="w-56">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter..."
+              className="w-full rounded-lg bg-panel border border-edge-strong px-2.5 py-1 text-xs text-ink placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+            <span className="flex items-center gap-1.5"><Plus size={14} /> Create</span>
+          </Button>
+        </div>
       </div>
       <Card>
         {apps.length === 0 ? (
@@ -82,10 +101,24 @@ export function AppList({ typeFilter, title, createTypes }: { typeFilter?: strin
   );
 }
 
+export interface McTemplate {
+  name?: string;
+  type?: string;
+  software?: string;
+  version?: string;
+  memoryMb?: number;
+  difficulty?: string;
+  gamemode?: string;
+  viewDistance?: number;
+  simulationDistance?: number;
+  isProxy?: boolean;
+}
+
 export function CreateAppModal({
-  open, onClose, onCreated, allowedTypes,
+  open, onClose, onCreated, allowedTypes, initialTemplate,
 }: {
   open: boolean; onClose: () => void; onCreated: (id: string) => void; allowedTypes?: string[];
+  initialTemplate?: McTemplate | null;
 }) {
   const toast = useToast();
   const { data: typesData } = useSWR<{ types: { type: string; displayName: string; description: string }[] }>(
@@ -113,7 +146,7 @@ export function CreateAppModal({
   const [mcView, setMcView] = useState(10);
   const [mcSim, setMcSim] = useState(10);
   const [mcAutoStart, setMcAutoStart] = useState(true);
-  const [mcEula, setMcEula] = useState(false);
+  const [mcEula, setMcEula] = useState(true);
   const [mcCustomMode, setMcCustomMode] = useState<'url' | 'upload'>('url');
   const [mcCustomUrl, setMcCustomUrl] = useState('');
   const [mcCustomFile, setMcCustomFile] = useState<File | null>(null);
@@ -121,6 +154,22 @@ export function CreateAppModal({
   // database config
   const [dbMemory, setDbMemory] = useState(0);
   const [dbName, setDbName] = useState('appdb');
+
+  useEffect(() => {
+    if (initialTemplate) {
+      if (initialTemplate.name) setName(initialTemplate.name);
+      if (initialTemplate.type) setType(initialTemplate.type);
+      if (initialTemplate.software) setMcSoftware(initialTemplate.software);
+      if (initialTemplate.version) setMcVersion(initialTemplate.version);
+      if (initialTemplate.memoryMb) setMcMemory(initialTemplate.memoryMb);
+      if (initialTemplate.difficulty) setMcDifficulty(initialTemplate.difficulty);
+      if (initialTemplate.gamemode) setMcGamemode(initialTemplate.gamemode);
+      if (initialTemplate.viewDistance) setMcView(initialTemplate.viewDistance);
+      if (initialTemplate.simulationDistance) setMcSim(initialTemplate.simulationDistance);
+      if (initialTemplate.isProxy !== undefined) setMcIsProxy(initialTemplate.isProxy);
+      setMcEula(true);
+    }
+  }, [initialTemplate, open]);
 
   const effectiveType = type || types[0]?.type || '';
   const effectiveNode = nodeId || nodes[0]?.id || '';

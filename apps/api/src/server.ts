@@ -24,7 +24,7 @@ import { authRoutes } from './routes/auth.js';
 import { nodeRoutes, agentWsRoute } from './routes/nodes.js';
 import { appRoutes } from './routes/apps.js';
 import { aiRoutes } from './routes/ai.js';
-import { taskRoutes, backupRoutes, auditRoutes, userRoutes, realtimeWsRoute } from './routes/misc.js';
+import { taskRoutes, backupRoutes, auditRoutes, securityRoutes, userRoutes, realtimeWsRoute } from './routes/misc.js';
 
 export interface BuiltServer {
   app: FastifyInstance;
@@ -107,6 +107,7 @@ export async function buildServer(config: ApiConfig): Promise<BuiltServer> {
   await app.register(async (v1) => taskRoutes(v1, ctx), { prefix: '/api/v1/tasks' });
   await app.register(async (v1) => backupRoutes(backups)(v1, ctx), { prefix: '/api/v1/backups' });
   await app.register(async (v1) => auditRoutes(v1, ctx), { prefix: '/api/v1/audit' });
+  await app.register(async (v1) => securityRoutes(v1, ctx), { prefix: '/api/v1/security' });
   await app.register(async (v1) => userRoutes(v1, ctx), { prefix: '/api/v1/users' });
   await app.register(async (v1) => agentWsRoute(v1, ctx), { prefix: '/api/v1/agent' });
   await app.register(async (v1) => realtimeWsRoute(v1, ctx), { prefix: '/api/v1/realtime' });

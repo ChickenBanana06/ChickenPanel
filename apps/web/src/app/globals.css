@@ -1,20 +1,24 @@
 @import 'tailwindcss';
 
 :root {
-  --bg: #0b0e14;
-  --bg-panel: #10141d;
-  --bg-raised: #161b26;
-  --bg-hover: #1c2230;
-  --border: #232a3a;
-  --border-strong: #2f3850;
-  --text: #e6e9f0;
-  --text-dim: #8b93a7;
-  --text-faint: #5b6478;
-  --accent: #5b8cff;
-  --accent-strong: #3d6ef7;
-  --green: #34d399;
-  --red: #f87171;
-  --amber: #fbbf24;
+  --bg: #090d14;
+  --bg-panel: #0e1420;
+  --bg-raised: #141c2c;
+  --bg-hover: #1b263b;
+  --border: #1f2c42;
+  --border-strong: #2c3e5e;
+  --text: #f0f4fc;
+  --text-dim: #94a3b8;
+  --text-faint: #64748b;
+  --accent: #10b981;
+  --accent-strong: #059669;
+  --diamond: #38bdf8;
+  --gold: #f59e0b;
+  --redstone: #ef4444;
+  --amethyst: #a855f7;
+  --green: #10b981;
+  --red: #ef4444;
+  --amber: #f59e0b;
 }
 
 @theme inline {
@@ -29,6 +33,10 @@
   --color-faint: var(--text-faint);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
+  --color-diamond: var(--diamond);
+  --color-gold: var(--gold);
+  --color-redstone: var(--redstone);
+  --color-amethyst: var(--amethyst);
   --color-ok: var(--green);
   --color-bad: var(--red);
   --color-warn: var(--amber);
@@ -45,6 +53,7 @@ body {
     'Segoe UI',
     Roboto,
     sans-serif;
+  min-height: 100vh;
 }
 
 * {
@@ -53,13 +62,33 @@ body {
 }
 
 .console-font {
-  font-family: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, ui-monospace, monospace;
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.85); }
 }
 .pulse-dot {
   animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes glow-emerald {
+  0%, 100% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.2); }
+  50% { box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); }
+}
+.glow-emerald {
+  animation: glow-emerald 3s ease-in-out infinite;
+}
+
+/* Custom Minecraft-styled block card border overlay */
+.mc-card {
+  background: linear-gradient(180deg, rgba(20, 28, 44, 0.7) 0%, rgba(14, 20, 32, 0.9) 100%);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.mc-card:hover {
+  border-color: var(--border-strong);
 }
