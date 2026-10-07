@@ -17,6 +17,10 @@ export interface ApiConfig {
 
 function defaultDataDir(): string {
   if (process.env.NEXPANEL_DATA_DIR) return process.env.NEXPANEL_DATA_DIR;
+  if (process.platform !== 'win32' && process.getuid && process.getuid() === 0) {
+    const cpData = '/home/chickenpanel/.local/share/nexpanel';
+    if (fs.existsSync(cpData)) return cpData;
+  }
   const base =
     process.platform === 'win32'
       ? (process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'))

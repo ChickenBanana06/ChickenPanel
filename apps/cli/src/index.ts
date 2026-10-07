@@ -79,7 +79,10 @@ const SERVICES: Record<ServiceName, ServiceDef> = {
     name: 'api',
     command: [process.execPath, path.join(repoRoot, 'apps', 'api', 'dist', 'index.js')],
     cwd: repoRoot,
-    env: { DATABASE_URL: DB_URL },
+    env: {
+      DATABASE_URL: DB_URL,
+      NEXPANEL_DATA_DIR: dataDir(),
+    },
   },
   web: {
     name: 'web',

@@ -216,7 +216,6 @@ function ProviderModal({
                 }
               }
             }}
-            disabled={!isNew}
           >
             {Object.entries(KIND_PRESETS).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
@@ -275,7 +274,7 @@ function ProviderModal({
               }
             }}
           >
-            Save
+            {isNew ? 'Save' : 'Save changes'}
           </Button>
         </div>
       </div>

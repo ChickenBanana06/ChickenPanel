@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { AIConversation, AIProvider, Prisma } from '@nexpanel/database';
@@ -109,14 +110,25 @@ export class AIService {
     { id: string; kind: string; displayName: string; baseUrl: string | null; enabled: boolean; apiKeyMasked: string | null }[]
   > {
     const rows = await this.ctx.db.aIProvider.findMany({ orderBy: { createdAt: 'asc' } });
-    return rows.map((p) => ({
-      id: p.id,
-      kind: p.kind,
-      displayName: p.displayName,
-      baseUrl: p.baseUrl,
-      enabled: p.enabled,
-      apiKeyMasked: p.apiKeyEnc ? maskSecret(this.decryptKey(p)) : null,
-    }));
+    return rows.map((p) => {
+      let apiKeyMasked: string | null = null;
+      if (p.apiKeyEnc) {
+        try {
+          const key = this.decryptKey(p);
+          apiKeyMasked = key ? maskSecret(key) : '••••••••';
+        } catch {
+          apiKeyMasked = '••••••••';
+        }
+      }
+      return {
+        id: p.id,
+        kind: p.kind,
+        displayName: p.displayName,
+        baseUrl: p.baseUrl,
+        enabled: p.enabled,
+        apiKeyMasked,
+      };
+    });
   }
 
   async deleteProvider(id: string): Promise<void> {
@@ -127,7 +139,34 @@ export class AIService {
 
   private decryptKey(provider: AIProvider): string {
     if (!provider.apiKeyEnc) return '';
-    return decryptSecret(provider.apiKeyEnc, this.ctx.config.secret);
+    try {
+      return decryptSecret(provider.apiKeyEnc, this.ctx.config.secret);
+    } catch {
+      // Fallback: check alternative key locations and auto-heal
+      const candidates = [
+        '/home/chickenpanel/.local/share/nexpanel/secret.key',
+        '/root/.local/share/nexpanel/secret.key',
+      ];
+      for (const filepath of candidates) {
+        try {
+          if (!fs.existsSync(filepath)) continue;
+          const candidateSecret = fs.readFileSync(filepath, 'utf8').trim();
+          if (!candidateSecret || candidateSecret === this.ctx.config.secret) continue;
+          const decrypted = decryptSecret(provider.apiKeyEnc, candidateSecret);
+          if (decrypted) {
+            // Re-encrypt under the active master secret
+            void this.ctx.db.aIProvider
+              .update({
+                where: { id: provider.id },
+                data: { apiKeyEnc: encryptSecret(decrypted, this.ctx.config.secret) },
+              })
+              .catch(() => undefined);
+            return decrypted;
+          }
+        } catch {}
+      }
+      return '';
+    }
   }
 
   private clientFor(provider: AIProvider): AIProviderClient {
