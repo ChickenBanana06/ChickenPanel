@@ -69,6 +69,8 @@ export const CreateConversationSchema = z.object({
 
 export const UpdateConversationSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  model: z.string().min(1).max(200).optional(),
+  providerId: z.string().optional(),
   autonomyLevel: z.enum(['full', 'moderate', 'none']).optional(),
 });
 

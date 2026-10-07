@@ -95,6 +95,8 @@ export async function aiRoutes(app: FastifyInstance, ctx: AppContext): Promise<v
       where: { id },
       data: {
         ...(body.name ? { name: body.name } : {}),
+        ...(body.model ? { model: body.model } : {}),
+        ...(body.providerId ? { providerId: body.providerId } : {}),
         ...(body.autonomyLevel ? { autonomyLevel: body.autonomyLevel } : {}),
       },
     });

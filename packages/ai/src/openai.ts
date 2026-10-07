@@ -166,16 +166,59 @@ export class OpenAIProvider implements AIProviderClient {
       } catch {
         continue;
       }
+
+      if (data.error) {
+        const errObj = data.error as { message?: string; code?: unknown } | string;
+        const msg = typeof errObj === 'string' ? errObj : errObj.message || JSON.stringify(errObj);
+        yield { type: 'done', stopReason: 'error', error: `Provider error: ${msg}` };
+        return;
+      }
+
       const usage = data.usage as { prompt_tokens?: number; completion_tokens?: number } | null | undefined;
       if (usage) {
         usageIn = usage.prompt_tokens ?? usageIn;
         usageOut = usage.completion_tokens ?? usageOut;
       }
-      const choice = (data.choices as { delta?: Record<string, unknown>; finish_reason?: string }[] | undefined)?.[0];
+      const choice = (data.choices as { delta?: Record<string, unknown>; message?: Record<string, unknown>; finish_reason?: string }[] | undefined)?.[0];
       if (!choice) continue;
       const delta = choice.delta ?? {};
-      if (typeof delta.content === 'string' && delta.content.length > 0) {
-        yield { type: 'text', delta: delta.content };
+
+      const reasoning =
+        typeof delta.reasoning_content === 'string'
+          ? delta.reasoning_content
+          : typeof delta.reasoning === 'string'
+            ? delta.reasoning
+            : typeof delta.thought === 'string'
+              ? delta.thought
+              : undefined;
+      if (reasoning) {
+        yield { type: 'thinking', delta: reasoning };
+      }
+
+      const textContent =
+        typeof delta.content === 'string'
+          ? delta.content
+          : typeof delta.text === 'string'
+            ? delta.text
+            : '';
+      if (textContent.length > 0) {
+        yield { type: 'text', delta: textContent };
+      }
+
+      const msg = choice.message;
+      if (msg) {
+        if (typeof msg.content === 'string' && msg.content.length > 0) {
+          yield { type: 'text', delta: msg.content };
+        }
+        const mReasoning =
+          typeof msg.reasoning_content === 'string'
+            ? msg.reasoning_content
+            : typeof msg.reasoning === 'string'
+              ? msg.reasoning
+              : undefined;
+        if (mReasoning) {
+          yield { type: 'thinking', delta: mReasoning };
+        }
       }
       const dToolCalls = delta.tool_calls as
         | { index?: number; id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }[]

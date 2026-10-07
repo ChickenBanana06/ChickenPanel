@@ -132,8 +132,12 @@ export class AIService {
   }
 
   async deleteProvider(id: string): Promise<void> {
-    const inUse = await this.ctx.db.aIConversation.count({ where: { providerId: id } });
-    if (inUse > 0) throw ApiError.conflict('Provider is used by existing conversations');
+    const convos = await this.ctx.db.aIConversation.findMany({ where: { providerId: id }, select: { id: true } });
+    for (const c of convos) {
+      this.cancelRun(c.id);
+    }
+    await this.ctx.db.aIConversation.deleteMany({ where: { providerId: id } });
+    await this.ctx.db.aIModel.deleteMany({ where: { providerId: id } });
     await this.ctx.db.aIProvider.delete({ where: { id } });
   }
 
@@ -187,13 +191,20 @@ export class AIService {
     }
     try {
       const models = await this.clientFor(provider).listModels();
+      const sorted = [...models].sort((a, b) => {
+        const aFree = a.id.endsWith(':free');
+        const bFree = b.id.endsWith(':free');
+        if (aFree && !bFree) return -1;
+        if (!aFree && bFree) return 1;
+        return a.displayName.localeCompare(b.displayName);
+      });
       await this.ctx.db.$transaction([
         this.ctx.db.aIModel.deleteMany({ where: { providerId } }),
         this.ctx.db.aIModel.createMany({
-          data: models.slice(0, 200).map((m) => ({ providerId, modelId: m.id, displayName: m.displayName })),
+          data: sorted.slice(0, 500).map((m) => ({ providerId, modelId: m.id, displayName: m.displayName })),
         }),
       ]);
-      return models;
+      return sorted;
     } catch (err) {
       const cached = await this.ctx.db.aIModel.findMany({ where: { providerId } });
       if (cached.length > 0) return cached.map((m) => ({ id: m.modelId, displayName: m.displayName }));
@@ -461,9 +472,49 @@ export class AIService {
         streamError = err instanceof Error ? err.message : String(err);
       }
 
+      if (streamError && toolDefs.length > 0 && text.length === 0 && toolCalls.length === 0) {
+        // Fallback: If calling with tools failed (some models or upstream endpoints don't support tools or get overloaded on function-calling),
+        // try once without tools so the AI can still converse and respond to the user!
+        try {
+          const fallbackStream = client.streamChat(
+            {
+              model: conv.model,
+              system: this.systemPrompt(conv),
+              messages: history,
+              maxTokens: 8192,
+            },
+            run.abort.signal,
+          );
+          let fbText = '';
+          let fbThinking = '';
+          let fbError: string | null = null;
+          for await (const evt of fallbackStream) {
+            if (evt.type === 'text') {
+              fbText += evt.delta;
+              this.publish(conversationId, 'stream.text', { delta: evt.delta });
+            } else if (evt.type === 'thinking') {
+              fbThinking += evt.delta;
+            } else if (evt.type === 'usage') {
+              usage = { inputTokens: evt.inputTokens, outputTokens: evt.outputTokens };
+            } else if (evt.type === 'done' && evt.stopReason === 'error') {
+              fbError = evt.error ?? 'Fallback failed';
+            }
+          }
+          if (fbText.length > 0) {
+            text = fbText;
+            thinking = fbThinking;
+            streamError = null;
+          } else if (fbError) {
+            streamError = fbError;
+          }
+        } catch {
+          // Keep original streamError
+        }
+      }
+
       if (streamError) {
         // Surface provider errors to the user instead of hiding them.
-        const errText = `[provider error] ${sanitizeForStorage(streamError)}`;
+        const errText = `⚠️ AI model error: ${sanitizeForStorage(streamError)}\n\n*(Tip: If this model is overloaded or rate-limited, you can switch to another model using the dropdown at the top of the chat.)*`;
         await this.persistAssistantMessage(conversationId, [{ type: 'text', text: errText }], usage);
         this.publish(conversationId, 'stream.text', { delta: errText });
         await this.setState(conversationId, 'errored');
@@ -483,6 +534,17 @@ export class AIService {
           ...(tc.providerMeta !== undefined ? { providerMeta: tc.providerMeta } : {}),
         });
       }
+
+      if (parts.length === 0) {
+        const errText =
+          `⚠️ The AI model returned an empty response. The model may be temporarily overloaded or unavailable.\n\n*(Tip: Try switching to another model at the top of the chat, such as liquid/lfm-2.5-2.6b:free or a paid model.)*`;
+        await this.persistAssistantMessage(conversationId, [{ type: 'text', text: errText }], usage);
+        this.publish(conversationId, 'stream.text', { delta: errText });
+        await this.setState(conversationId, 'errored');
+        this.publish(conversationId, 'run.done', { state: 'errored' });
+        return;
+      }
+
       const assistantMsg = await this.persistAssistantMessage(conversationId, parts, usage);
       this.publish(conversationId, 'message.assistant', { messageId: assistantMsg.id });
 

@@ -18,6 +18,7 @@ interface Conversation {
   id: string;
   name: string;
   model: string;
+  providerId?: string;
   state: string;
   autonomyLevel?: 'full' | 'moderate' | 'none';
   provider?: { displayName: string; kind: string };
@@ -326,8 +327,24 @@ function NewConversation({ onCreated, onCancel }: { onCreated: (id: string) => v
     fetcher,
     { shouldRetryOnError: false },
   );
+  const [modelFilter, setModelFilter] = useState('');
   const models = modelData?.models ?? [];
-  const effectiveModel = model || models[0]?.id || '';
+
+  useEffect(() => {
+    if (models.length > 0 && !model) {
+      // Prioritize free models if available, or first model
+      const free = models.find((m) => m.id.endsWith(':free'));
+      setModel(free ? free.id : models[0]!.id);
+    }
+  }, [models, model]);
+
+  const filteredModels = useMemo(() => {
+    if (!modelFilter.trim()) return models;
+    const q = modelFilter.toLowerCase();
+    return models.filter((m) => m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+  }, [models, modelFilter]);
+
+  const effectiveModel = model || filteredModels[0]?.id || models[0]?.id || '';
 
   return (
     <div className="p-4 space-y-3 border-b border-edge bg-raised/20">
@@ -345,19 +362,34 @@ function NewConversation({ onCreated, onCancel }: { onCreated: (id: string) => v
         <>
           <div className="space-y-1">
             <label className="text-[11px] text-faint">AI Provider</label>
-            <Select value={effectiveProvider} onChange={(e) => { setProviderId(e.target.value); setModel(''); }}>
+            <Select value={effectiveProvider} onChange={(e) => { setProviderId(e.target.value); setModel(''); setModelFilter(''); }}>
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>{p.displayName}</option>
               ))}
             </Select>
           </div>
           <div className="space-y-1">
-            <label className="text-[11px] text-faint">Model</label>
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-faint">Model</label>
+              {models.length > 0 && (
+                <span className="text-[10px] text-faint">{models.length} models</span>
+              )}
+            </div>
+            {models.length > 6 && (
+              <Input
+                placeholder="Search models (e.g. free, llama, gemini, claude)…"
+                value={modelFilter}
+                onChange={(e) => setModelFilter(e.target.value)}
+                className="text-xs py-1"
+              />
+            )}
             <Select value={effectiveModel} onChange={(e) => setModel(e.target.value)} disabled={modelsLoading}>
               {modelsLoading && <option>Loading models…</option>}
-              {!modelsLoading && models.length === 0 && <option value="">No models available</option>}
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.displayName}</option>
+              {!modelsLoading && filteredModels.length === 0 && <option value="">No models match filter</option>}
+              {filteredModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id.endsWith(':free') ? '⭐ [FREE] ' : ''}{m.displayName}
+                </option>
               ))}
             </Select>
             {modelsError && (
@@ -471,9 +503,23 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
   const bottomRef = useRef<HTMLDivElement>(null);
   const typewriter = useTypewriter();
   const streamText = typewriter.displayed;
+
+  const [showModelSwitch, setShowModelSwitch] = useState(false);
+  const activeModel = data?.conversation.model ?? conversation.model;
+  const activeProviderId = data?.conversation.providerId ?? conversation.providerId;
+  const { data: convModelsData } = useSWR<{ models: { id: string; displayName: string }[] }>(
+    activeProviderId ? `/ai/providers/${activeProviderId}/models` : null,
+    fetcher,
+  );
+  const availableModels = convModelsData?.models ?? [];
+
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refetch = useCallback(() => {
-    void mutate();
-    onStateChange();
+    if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+    refetchTimerRef.current = setTimeout(() => {
+      void mutate();
+      onStateChange();
+    }, 150);
   }, [mutate, onStateChange]);
 
   useRealtimeTopic(`chat:${convId}`, (evt) => {
@@ -574,6 +620,57 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
 
   return (
     <>
+      {/* Model bar */}
+      <div className="px-3 py-1.5 border-b border-edge/60 bg-raised/20 flex items-center justify-between text-[11px] shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-2">
+          <Sparkles size={11} className="text-accent shrink-0" />
+          <span className="truncate font-mono text-[10px] text-ink" title={activeModel}>
+            {activeModel.split('/').pop()}
+          </span>
+          {activeModel.endsWith(':free') && (
+            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 font-semibold border border-emerald-500/30 shrink-0">
+              FREE
+            </span>
+          )}
+        </div>
+        {availableModels.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShowModelSwitch((v) => !v)}
+            className="text-accent hover:underline text-[10px] font-medium shrink-0 cursor-pointer"
+          >
+            {showModelSwitch ? 'Done' : 'Switch model'}
+          </button>
+        )}
+      </div>
+
+      {showModelSwitch && availableModels.length > 0 && (
+        <div className="p-2 border-b border-edge bg-raised/40 space-y-1 text-xs shrink-0">
+          <div className="text-[10px] text-faint">Select model for this conversation:</div>
+          <Select
+            value={activeModel}
+            onChange={async (e) => {
+              const newModel = e.target.value;
+              if (!newModel || newModel === activeModel) return;
+              try {
+                await api('PATCH', `/ai/conversations/${convId}`, { model: newModel });
+                setShowModelSwitch(false);
+                refetch();
+                toast('success', `Model switched to ${newModel.split('/').pop()}`);
+              } catch (err) {
+                toast('error', err instanceof Error ? err.message : 'Failed to switch model');
+              }
+            }}
+          >
+            {availableModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.id.endsWith(':free') ? '⭐ [FREE] ' : ''}{m.displayName}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {messages.length === 0 && !streamText && (
           <div className="space-y-4 my-6 px-1">
@@ -760,6 +857,20 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
 function MessageView({ message, convId, onAction }: { message: Message; convId: string; onAction: () => void }) {
   if (message.role === 'tool') return null; // raw tool results are shown via their tool_call chip
   const isUser = message.role === 'user';
+  if (!message.parts || message.parts.length === 0) {
+    if (isUser) return null;
+    return (
+      <div className="text-xs text-amber-300 bg-amber-950/20 border border-amber-500/30 rounded-lg p-2.5 space-y-1">
+        <div className="font-semibold flex items-center gap-1.5 text-amber-400">
+          <AlertTriangle size={13} />
+          <span>No response from model</span>
+        </div>
+        <p className="text-[11px] text-dim">
+          The upstream AI model returned an empty reply or was overloaded. Try switching models using the button at the top of the chat or sending another message.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className={cx('space-y-1.5', isUser && 'flex flex-col items-end')}>
       {message.parts.map((part, i) => (
@@ -784,11 +895,16 @@ function PartView({
 }) {
   const toast = useToast();
   if (part.type === 'text') {
+    const isError = !isUser && (part.text.startsWith('⚠️') || part.text.startsWith('[provider error]') || part.text.startsWith('[error]'));
     return (
       <div
         className={cx(
           'text-[13px] whitespace-pre-wrap leading-relaxed rounded-lg px-3 py-2 max-w-full break-words',
-          isUser ? 'bg-accent-strong/25 border border-accent/30' : 'bg-raised/60 border border-edge',
+          isUser
+            ? 'bg-accent-strong/25 border border-accent/30'
+            : isError
+              ? 'bg-amber-950/25 border border-amber-500/40 text-amber-200 shadow-sm'
+              : 'bg-raised/60 border border-edge',
         )}
       >
         {part.text}
