@@ -39,6 +39,15 @@
   - [Discord Bots & Python Apps](#discord-bots--python-apps)
   - [Custom Web Services](#custom-web-services)
   - [Using the AI Operator](#using-the-ai-operator)
+- [Commercial Hosting & Production Deployment Guide](#-commercial-hosting--production-deployment-guide)
+  - [1. Production Infrastructure Topology](#1-production-infrastructure-topology)
+  - [2. Reverse Proxy, Domains & SSL (Nginx / Caddy)](#2-reverse-proxy-domains--ssl-nginx--caddy)
+  - [3. Production External Database (PostgreSQL 16)](#3-production-external-database-postgresql-16)
+  - [4. Untrusted Customer Workloads & Node Hardening](#4-untrusted-customer-workloads--node-hardening)
+  - [5. Network Security, Port Allocation & DDoS Mitigation](#5-network-security-port-allocation--ddos-mitigation)
+  - [6. Remote Offsite Backups (S3 / R2 / Wasabi)](#6-remote-offsite-backups-s3--r2--wasabi)
+  - [7. Billing & API Automation (WHMCS / Blesta / Tebex)](#7-billing--api-automation-whmcs--blesta--tebex)
+  - [8. Production Monitoring & High Availability](#8-production-monitoring--high-availability)
 - [Security & Isolation Features](#-security--isolation-features)
 - [Troubleshooting & FAQ](#-troubleshooting--faq)
 - [Development & Testing](#-development--testing)
@@ -536,6 +545,396 @@ ChickenPanel includes an embedded AI Operator accessible from the bottom bar or 
 - **Configure AI Key:** Open **Settings** -> **AI Configuration** and enter an OpenAI, Anthropic, or custom API key. Keys are encrypted at rest using AES-256-GCM.
 - **Troubleshoot Server Errors:** When a server crashes, click **Analyze Crash** in the console. The AI reads recent stack traces and suggests fixes.
 - **Safety Guarantee:** The AI runs within strict authorization boundaries and cannot execute destructive actions without explicit interactive approval.
+
+---
+
+## 🏢 Commercial Hosting & Production Deployment Guide
+
+If you plan to run ChickenPanel as a **commercial hosting provider** (e.g. selling game servers, Discord bot hosting, or app hosting to public customers), follow this production architecture and hardening guide.
+
+---
+
+### 1. Production Infrastructure Topology
+
+In a commercial environment, **never run the Web Panel and customer game servers on the same single server**. Separate the control plane from the compute nodes:
+
+```text
+               ┌────────────────────────────────────────────────────────┐
+               │         Domain / DNS & Anycast DDoS Layer              │
+               │           (Cloudflare / Cosmic Guard / Path)           │
+               └───────────┬────────────────────────────────┬───────────┘
+                           │ HTTPS (443)                    │ HTTPS / WSS (443)
+                           ▼                                ▼
+               ┌───────────────────────┐        ┌───────────────────────┐
+               │ panel.yourhosting.com │        │  api.yourhosting.com  │
+               └───────────┬───────────┘        └───────────┬───────────┘
+                           │                                │
+                           ▼                                ▼
+              ┌──────────────────────────────────────────────────────────┐
+              │             Dedicated Control Plane Server               │
+              │  • Nginx Reverse Proxy (SSL Termination)                 │
+              │  • Next.js Web UI (Port 3000)                            │
+              │  • Fastify API & WebSocket Gateway (Port 4000)           │
+              │  • Dedicated PostgreSQL 16 Cluster + Automated Backups   │
+              └────────────────────────────┬─────────────────────────────┘
+                                           │ Encrypted WebSocket (WSS)
+                 ┌─────────────────────────┼─────────────────────────┐
+                 ▼                         ▼                         ▼
+      ┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+      │   Node 1 (US-East)  │   │   Node 2 (EU-West)  │   │   Node 3 (APAC)     │
+      │  Bare-Metal Compute │   │  Bare-Metal Compute │   │  Bare-Metal Compute │
+      │  • Ryzen 9 / EPYC   │   │  • Ryzen 9 / EPYC   │   │  • Ryzen 9 / EPYC   │
+      │  • NVMe RAID 1      │   │  • NVMe RAID 1      │   │  • NVMe RAID 1      │
+      │  • ChickenPanel Agt │   │  • ChickenPanel Agt │   │  • ChickenPanel Agt │
+      │  • Customer Servers │   │  • Customer Servers │   │  • Customer Servers │
+      └─────────────────────┘   └─────────────────────┘   └─────────────────────┘
+```
+
+#### Hardware Recommendations for Compute Nodes:
+- **Game Server Hosting (Minecraft, Rust, Palworld):** High single-core boost clock CPUs (e.g., AMD Ryzen 9 7950X / 9950X or Intel Core i9-14900K), DDR5 ECC RAM, enterprise NVMe storage in RAID-1.
+- **Bot & Python Hosting:** High core-count CPUs (AMD EPYC or Intel Xeon), high RAM density.
+- **Network:** 1 Gbps to 10 Gbps unmetered uplink with upstream Anti-DDoS mitigation.
+
+---
+
+### 2. Reverse Proxy, Domains & SSL (Nginx / Caddy)
+
+In production, do not expose raw Node ports (`3000` or `4000`) directly to users. Put them behind Nginx or Caddy with automated Let's Encrypt SSL.
+
+#### Option A: Production Nginx Configuration
+
+1. **Install Nginx and Certbot on your Control Plane server:**
+   ```bash
+   sudo apt install -y nginx certbot python3-certbot-nginx
+   ```
+
+2. **Create the Nginx site configuration:**
+   ```bash
+   sudo nano /etc/nginx/sites-available/chickenpanel.conf
+   ```
+
+3. **Paste the following configuration** (replace `panel.yourhosting.com` and `api.yourhosting.com` with your real domains):
+   ```nginx
+   # 1. ChickenPanel Web Frontend (Next.js)
+   server {
+       server_name panel.yourhosting.com;
+
+       location / {
+           proxy_pass http://127.0.0.1:3000;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+
+   # 2. ChickenPanel API & WebSocket Gateway
+   server {
+       server_name api.yourhosting.com;
+
+       location / {
+           proxy_pass http://127.0.0.1:4000;
+           proxy_http_version 1.1;
+
+           # WebSocket support (Crucial for live consoles, tasks, & node agent connections)
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+
+           # Timeout settings for persistent node agent connections
+           proxy_read_timeout 86400s;
+           proxy_send_timeout 86400s;
+           client_max_body_size 500M;
+       }
+   }
+   ```
+
+4. **Enable site and obtain SSL certificates:**
+   ```bash
+   sudo ln -sf /etc/nginx/sites-available/chickenpanel.conf /etc/nginx/sites-enabled/
+   sudo nginx -t
+   sudo systemctl reload nginx
+   sudo certbot --nginx -d panel.yourhosting.com -d api.yourhosting.com
+   ```
+
+#### Option B: Caddy (Automatic HTTPS Alternative)
+If you prefer Caddy for automatic certificate issuance:
+```caddy
+panel.yourhosting.com {
+    reverse_proxy 127.0.0.1:3000
+}
+
+api.yourhosting.com {
+    reverse_proxy 127.0.0.1:4000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+    }
+}
+```
+
+---
+
+### 3. Production External Database (PostgreSQL 16)
+
+For commercial hosting, do not use the dev embedded database. Set up a standalone, optimized PostgreSQL 16 cluster.
+
+1. **Install PostgreSQL 16 on Ubuntu:**
+   ```bash
+   sudo apt install -y postgresql postgresql-contrib
+   sudo systemctl enable --now postgresql
+   ```
+
+2. **Create a production user and database with a strong random password:**
+   ```bash
+   sudo -u postgres psql
+   ```
+   Execute the SQL commands:
+   ```sql
+   CREATE USER chickenpanel_prod WITH PASSWORD 'ReplaceWithStrongProductionPassword32Chars!';
+   CREATE DATABASE chickenpanel_prod OWNER chickenpanel_prod;
+   GRANT ALL PRIVILEGES ON DATABASE chickenpanel_prod TO chickenpanel_prod;
+   \q
+   ```
+
+3. **Configure ChickenPanel to use the production database:**
+   In `/home/chickenpanel/chickenpanel/.env`:
+   ```bash
+   DATABASE_URL="postgresql://chickenpanel_prod:ReplaceWithStrongProductionPassword32Chars!@127.0.0.1:5432/chickenpanel_prod?sslmode=prefer"
+   ```
+
+4. **Deploy database migrations:**
+   ```bash
+   cd /home/chickenpanel/chickenpanel
+   pnpm --filter @nexpanel/database migrate:deploy
+   ```
+
+5. **Automated Daily Database Backups:**
+   Create `/etc/cron.daily/backup-chickenpanel-db`:
+   ```bash
+   sudo tee /etc/cron.daily/backup-chickenpanel-db << 'EOF'
+   #!/usr/bin/env bash
+   BACKUP_DIR="/var/backups/chickenpanel"
+   mkdir -p "$BACKUP_DIR"
+   pg_dump -U chickenpanel_prod -h 127.0.0.1 chickenpanel_prod | gzip > "$BACKUP_DIR/db-$(date +%F).sql.gz"
+   find "$BACKUP_DIR" -type f -name "*.sql.gz" -mtime +14 -delete
+   EOF
+   sudo chmod +x /etc/cron.daily/backup-chickenpanel-db
+   ```
+
+---
+
+### 4. Untrusted Customer Workloads & Node Hardening
+
+When hosting untrusted users, customer code may attempt privilege escalation, port scanning, or disk abuse. Apply the following node hardening measures:
+
+#### A. Linux Kernel Hardening (`/etc/sysctl.d/99-security.conf`)
+Prevent symlink exploits, ptrace snooping, and network buffer exhaustion:
+
+```bash
+sudo tee /etc/sysctl.d/99-security.conf << 'EOF'
+# Prevent symlink and hardlink exploits in shared world-writable directories
+fs.protected_symlinks = 1
+fs.protected_hardlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2
+
+# Increase file descriptor and process limits for hosting hundreds of servers
+fs.file-max = 2097152
+
+# Network connection handling & SYN flood protection
+net.core.somaxconn = 65535
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+EOF
+sudo sysctl --system
+```
+
+#### B. Block Outbound Abuse & Spam (Egress Firewall)
+Prevent compromised customer game servers or Discord bots from launching outbound DDoS attacks, sending spam, or scanning networks:
+
+```bash
+# Block outgoing SMTP (prevent spam blacklisting of your hosting IPs)
+sudo iptables -A OUTPUT -p tcp --dport 25 -j DROP
+sudo iptables -A OUTPUT -p tcp --dport 465 -j DROP
+sudo iptables -A OUTPUT -p tcp --dport 587 -j DROP
+
+# Block NetBIOS and SMB
+sudo iptables -A OUTPUT -p tcp --dport 135:139 -j DROP
+sudo iptables -A OUTPUT -p tcp --dport 445 -j DROP
+sudo iptables -A OUTPUT -p udp --dport 137:138 -j DROP
+
+# Block SSDP amplification reflection
+sudo iptables -A OUTPUT -p udp --dport 1900 -j DROP
+
+# Save iptables rules permanently
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+#### C. Enforce Disk Quotas per Customer Application
+Prevent any individual customer from filling the node's disk with excessive logs, world files, or archives:
+- Format the application storage drive with **ext4** (with `prjquota` enabled) or **XFS**.
+- Mount storage with project quotas enabled:
+  ```bash
+  # In /etc/fstab:
+  /dev/nvme0n1p1  /home/chickenpanel/.local/share/nexpanel-agent  ext4  defaults,prjquota  0  2
+  ```
+
+---
+
+### 5. Network Security, Port Allocation & DDoS Mitigation
+
+#### Port Allocation Strategy
+- **Shared IP Address:** Assign each customer a specific game port (e.g., Customer A: `25565`, Customer B: `25566`, Customer C: `25567`). ChickenPanel automatically binds ports assigned during application creation.
+- **Dedicated IP Addresses:** For premium hosting tiers, attach multiple secondary IP addresses to the node interface:
+  ```bash
+  sudo ip addr add 198.51.100.15/24 dev eth0
+  ```
+  Customers on dedicated IPs can use default standard ports (`25565` for Minecraft, `7777` for Terraria).
+
+#### DDoS Mitigation Providers
+Game servers are prime targets for Layer 4 UDP/TCP DDoS attacks (amplification, SYN floods, botnets). For commercial operations, route node traffic through a specialized gaming DDoS mitigation provider:
+- **Cosmic Guard / Path.net / NeoProtect:** Specialized low-latency Layer 4 reverse-proxy filters designed specifically for Minecraft, Rust, and Steam games.
+- **Cloudflare Spectrum:** TCP/UDP DDoS protection for game protocols.
+- **OVHcloud / Hetzner:** Hardware Anti-DDoS protection included on dedicated servers.
+
+---
+
+### 6. Remote Offsite Backups (S3 / R2 / Wasabi)
+
+Never store backups solely on the local server where customer applications reside. Automate replication to S3-compatible cloud storage:
+
+1. **Install AWS CLI / Rclone:**
+   ```bash
+   sudo apt install -y rclone
+   rclone config   # Configure S3, Cloudflare R2, Wasabi, or Backblaze B2
+   ```
+
+2. **Automate Nightly Backup Sync:**
+   Create `/etc/cron.daily/sync-backups-s3`:
+   ```bash
+   sudo tee /etc/cron.daily/sync-backups-s3 << 'EOF'
+   #!/usr/bin/env bash
+   # Sync all customer application backups to offsite S3 bucket
+   rclone sync /home/chickenpanel/.local/share/nexpanel-agent/backups remote-s3:myhosting-panel-backups/ --fast-list
+   EOF
+   sudo chmod +x /etc/cron.daily/sync-backups-s3
+   ```
+
+---
+
+### 7. Billing & API Automation (WHMCS / Blesta / Tebex)
+
+ChickenPanel provides a comprehensive REST API that allows your billing platform (WHMCS, Blesta, Tebex, or custom web store) to automatically provision, manage, suspend, and delete customer servers upon checkout or cancellation.
+
+#### API Authentication
+Create an API key in ChickenPanel (**Settings -> API Keys**) and include it in request headers:
+```http
+Authorization: Bearer <YOUR_PANEL_API_KEY>
+Content-Type: application/json
+```
+
+#### Automated Workflows:
+
+#### A. Provision Server on Payment (`POST /api/apps`)
+```bash
+curl -X POST https://api.yourhosting.com/api/apps \
+  -H "Authorization: Bearer <YOUR_PANEL_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Customer #1042 - Paper 1.21",
+    "type": "minecraft",
+    "nodeId": "node_cm123abc",
+    "ownerId": "usr_cust1042",
+    "flavor": "paper",
+    "version": "1.21.1",
+    "memoryMb": 4096,
+    "port": 25565
+  }'
+```
+
+#### B. Start Server (`POST /api/apps/:id/start`)
+```bash
+curl -X POST https://api.yourhosting.com/api/apps/app_987xyz/start \
+  -H "Authorization: Bearer <YOUR_PANEL_API_KEY>"
+```
+
+#### C. Suspend Server on Overdue Invoice (`POST /api/apps/:id/stop`)
+```bash
+curl -X POST https://api.yourhosting.com/api/apps/app_987xyz/stop \
+  -H "Authorization: Bearer <YOUR_PANEL_API_KEY>"
+```
+
+#### D. Terminate Server on Cancellation / Chargeback (`DELETE /api/apps/:id`)
+```bash
+curl -X DELETE https://api.yourhosting.com/api/apps/app_987xyz \
+  -H "Authorization: Bearer <YOUR_PANEL_API_KEY>"
+```
+
+---
+
+### 8. Production Monitoring & High Availability
+
+#### A. Node Exporter & Prometheus Monitoring
+Monitor CPU, RAM, disk I/O, and network bandwidth on each compute node:
+```bash
+sudo apt install -y prometheus-node-exporter
+sudo systemctl enable --now prometheus-node-exporter
+```
+Scrape port `9100` into your centralized Grafana dashboard to alert when node RAM exceeds 90% or disk usage reaches 85%.
+
+#### B. Production Node Agent Systemd Service
+On each compute node, run the agent as a resilient systemd daemon:
+
+```bash
+sudo tee /etc/systemd/system/chickenpanel-agent.service << 'EOF'
+[Unit]
+Description=ChickenPanel Node Compute Agent
+After=network.target
+
+[Service]
+Type=forking
+User=chickenpanel
+WorkingDirectory=/home/chickenpanel/chickenpanel
+ExecStart=/usr/local/bin/chickenpanel start agent
+ExecStop=/usr/local/bin/chickenpanel stop agent
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+LimitNPROC=32768
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now chickenpanel-agent
+```
+
+#### C. Log Rotation
+Prevent log files in `~/.local/share/nexpanel/logs/` from growing indefinitely:
+
+```bash
+sudo tee /etc/logrotate.d/chickenpanel << 'EOF'
+/home/chickenpanel/.local/share/nexpanel/logs/*.log
+/home/chickenpanel/.local/share/nexpanel-agent/logs/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+}
+EOF
+```
 
 ---
 
