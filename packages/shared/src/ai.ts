@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
-export const AI_PROVIDER_KINDS = ['anthropic', 'openai', 'google', 'openai-compatible'] as const;
+export const AI_PROVIDER_KINDS = ['anthropic', 'openai', 'google', 'openrouter', 'openai-compatible'] as const;
 export type AIProviderKind = (typeof AI_PROVIDER_KINDS)[number];
+
+export const AI_AUTONOMY_LEVELS = ['full', 'moderate', 'none'] as const;
+export type AIAutonomyLevel = (typeof AI_AUTONOMY_LEVELS)[number];
 
 /* ------------------------------------------------------------------ */
 /* Interactive UI the AI can render in chat                            */

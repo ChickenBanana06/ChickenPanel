@@ -19,6 +19,16 @@ export function createProviderClient(cfg: ProviderConfig): AIProviderClient {
       return new OpenAIProvider('openai', cfg.apiKey, cfg.baseUrl ?? undefined);
     case 'google':
       return new OpenAIProvider('google', cfg.apiKey, cfg.baseUrl ?? GOOGLE_OPENAI_BASE_URL);
+    case 'openrouter':
+      return new OpenAIProvider(
+        'openrouter',
+        cfg.apiKey,
+        cfg.baseUrl ?? 'https://openrouter.ai/api/v1',
+        {
+          'HTTP-Referer': 'https://chickenpanel.io',
+          'X-Title': 'ChickenPanel',
+        },
+      );
     case 'openai-compatible': {
       if (!cfg.baseUrl) throw new Error('openai-compatible provider requires a baseUrl');
       return new OpenAIProvider('openai-compatible', cfg.apiKey, cfg.baseUrl);

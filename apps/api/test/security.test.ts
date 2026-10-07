@@ -170,3 +170,50 @@ test('requireBackupAccess blocks IDOR access to foreign backups', async () => {
   }, /Access denied/);
 });
 
+test('UpsertAIProviderSchema accepts openrouter provider kind', async () => {
+  const { UpsertAIProviderSchema } = await import('@nexpanel/shared');
+  const parsed = UpsertAIProviderSchema.parse({
+    kind: 'openrouter',
+    displayName: 'OpenRouter',
+    apiKey: 'sk-or-v1-test',
+    baseUrl: 'https://openrouter.ai/api/v1',
+  });
+  assert.equal(parsed.kind, 'openrouter');
+  assert.equal(parsed.baseUrl, 'https://openrouter.ai/api/v1');
+});
+
+test('CreateConversationSchema and UpdateConversationSchema validate autonomy levels', async () => {
+  const { CreateConversationSchema, UpdateConversationSchema } = await import('@nexpanel/shared');
+  const created = CreateConversationSchema.parse({
+    providerId: 'p-1',
+    model: 'anthropic/claude-3.5-sonnet',
+  });
+  assert.equal(created.name, 'New chat');
+  assert.equal(created.autonomyLevel, 'moderate');
+
+  const fullAccess = CreateConversationSchema.parse({
+    providerId: 'p-1',
+    model: 'anthropic/claude-3.5-sonnet',
+    autonomyLevel: 'full',
+  });
+  assert.equal(fullAccess.autonomyLevel, 'full');
+
+  const updated = UpdateConversationSchema.parse({
+    autonomyLevel: 'none',
+  });
+  assert.equal(updated.autonomyLevel, 'none');
+
+  assert.throws(() => {
+    UpdateConversationSchema.parse({ autonomyLevel: 'invalid' });
+  });
+});
+
+test('createProviderClient instantiates OpenRouter client with OpenRouter baseUrl', async () => {
+  const { createProviderClient } = await import('@nexpanel/ai');
+  const client = createProviderClient({
+    kind: 'openrouter',
+    apiKey: 'sk-or-v1-test-key',
+  });
+  assert.equal(client.kind, 'openrouter');
+});
+

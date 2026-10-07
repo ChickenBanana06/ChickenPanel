@@ -203,6 +203,7 @@ model AIConversation {
   provider     AIProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
   model        String
   state        String     @default("idle")
+  autonomyLevel String    @default("moderate")
   workspaceId  String?
   workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   systemPrompt String?

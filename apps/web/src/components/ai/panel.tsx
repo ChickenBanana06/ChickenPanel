@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import {
-  Plus, Menu, Send, Square, ChevronDown, ChevronRight, Wrench,
+  Plus, Send, Square, ChevronDown, ChevronRight, Wrench,
   Check, XIcon, AlertTriangle, Trash2, MessageSquare,
+  Paperclip, Shield, Zap, Lock, FileText, X, History, Sparkles,
 } from 'lucide-react';
 import { api, fetcher } from '@/lib/api';
 import { useRealtimeTopic } from '@/lib/realtime';
@@ -18,6 +19,7 @@ interface Conversation {
   name: string;
   model: string;
   state: string;
+  autonomyLevel?: 'full' | 'moderate' | 'none';
   provider?: { displayName: string; kind: string };
   updatedAt: string;
 }
@@ -70,11 +72,43 @@ const STATE_LABELS: Record<string, string> = {
   errored: 'Error',
 };
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatRelativeTime(dateStr: string): string {
+  try {
+    const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+    return new Date(dateStr).toLocaleDateString();
+  } catch {
+    return '';
+  }
+}
+
 /* ---------------- Panel ---------------- */
 
 export function AIPanel({ onClose: _onClose }: { onClose: () => void }) {
   const toast = useToast();
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveIdState] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chickenpanel_ai_active_conv');
+    }
+    return null;
+  });
+  const setActiveId = useCallback((id: string | null) => {
+    setActiveIdState(id);
+    if (typeof window !== 'undefined') {
+      if (id) localStorage.setItem('chickenpanel_ai_active_conv', id);
+      else localStorage.removeItem('chickenpanel_ai_active_conv');
+    }
+  }, []);
+
   const [showList, setShowList] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
@@ -87,37 +121,60 @@ export function AIPanel({ onClose: _onClose }: { onClose: () => void }) {
   const active = conversations.find((c) => c.id === activeId) ?? null;
 
   useEffect(() => {
-    if (!activeId && conversations.length > 0) setActiveId(conversations[0]!.id);
-  }, [activeId, conversations]);
+    if (conversations.length > 0) {
+      if (!activeId || !conversations.some((c) => c.id === activeId)) {
+        setActiveId(conversations[0]!.id);
+      }
+    } else if (activeId) {
+      setActiveId(null);
+    }
+  }, [conversations, activeId, setActiveId]);
 
   return (
     <aside className="w-[380px] shrink-0 border-l border-edge flex flex-col bg-panel/40">
       {/* Header */}
-      <div className="h-11 border-b border-edge flex items-center px-3 gap-2 shrink-0">
-        <button className="text-dim hover:text-ink" title="Conversations" onClick={() => setShowList((v) => !v)}>
-          <Menu size={16} />
+      <div className="h-12 border-b border-edge flex items-center px-3 gap-2 shrink-0 bg-panel/70">
+        <button
+          className={cx(
+            'p-1.5 rounded-lg border transition-colors flex items-center gap-1.5 text-xs',
+            showList ? 'bg-accent/15 border-accent text-ink' : 'border-edge hover:bg-hover text-dim hover:text-ink',
+          )}
+          title="Past Conversations"
+          onClick={() => {
+            setShowList((v) => !v);
+            setShowNew(false);
+          }}
+        >
+          <History size={14} />
+          <span className="font-medium text-xs">Chats</span>
+          <ChevronDown size={12} className={cx('transition-transform duration-150', showList && 'rotate-180')} />
         </button>
-        <div className="flex-1 min-w-0">
+
+        <div className="flex-1 min-w-0 px-1">
           {active ? (
-            <div className="truncate text-sm font-medium">{active.name}</div>
+            <div className="truncate text-xs font-semibold text-ink" title={active.name}>
+              {active.name}
+            </div>
           ) : (
-            <div className="text-sm text-dim">AI Assistant</div>
+            <div className="text-xs font-medium text-dim">Cluck AI</div>
+          )}
+          {active && (
+            <div className="text-[10px] text-faint truncate">
+              {active.provider?.displayName} · {STATE_LABELS[active.state] ?? active.state}
+            </div>
           )}
         </div>
-        {active && (
-          <span className="text-[10px] text-faint whitespace-nowrap">
-            {active.provider?.displayName} · {STATE_LABELS[active.state] ?? active.state}
-          </span>
-        )}
+
         <button
-          className="text-dim hover:text-ink"
+          className="p-1.5 rounded-lg border border-edge hover:bg-hover text-dim hover:text-ink transition-colors flex items-center gap-1 text-xs shrink-0"
           title="New conversation"
           onClick={() => {
             setShowNew(true);
             setShowList(false);
           }}
         >
-          <Plus size={16} />
+          <Plus size={14} />
+          <span>New</span>
         </button>
       </div>
 
@@ -179,37 +236,56 @@ function ConversationList({
   onDeleted: (id: string) => void;
 }) {
   const toast = useToast();
+  const [filter, setFilter] = useState('');
+  const filtered = useMemo(() => {
+    if (!filter.trim()) return conversations;
+    const q = filter.toLowerCase();
+    return conversations.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.model.toLowerCase().includes(q),
+    );
+  }, [conversations, filter]);
+
   return (
-    <div className="border-b border-edge max-h-64 overflow-y-auto">
-      {conversations.length === 0 && <p className="text-xs text-faint p-3">No conversations.</p>}
-      {conversations.map((c) => (
+    <div className="border-b border-edge max-h-72 overflow-y-auto bg-raised/30 divide-y divide-edge/30">
+      <div className="p-2 sticky top-0 bg-panel/95 backdrop-blur z-10 border-b border-edge">
+        <Input
+          placeholder="Filter conversations…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      </div>
+      {filtered.length === 0 && (
+        <p className="text-xs text-faint p-4 text-center">No conversations found.</p>
+      )}
+      {filtered.map((c) => (
         <div
           key={c.id}
           className={cx(
-            'flex items-center gap-2 px-3 py-2 cursor-pointer border-b border-edge/50 last:border-b-0',
-            c.id === activeId ? 'bg-accent/10' : 'hover:bg-hover',
+            'flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors',
+            c.id === activeId ? 'bg-accent/15 border-l-2 border-accent' : 'hover:bg-hover',
           )}
           onClick={() => onSelect(c.id)}
         >
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] truncate">{c.name}</div>
-            <div className="text-[10px] text-faint">
-              {c.provider?.displayName} · {c.model.split('/').pop()}
+            <div className="text-[13px] font-medium text-ink truncate">{c.name}</div>
+            <div className="text-[10px] text-faint flex items-center gap-2 mt-0.5">
+              <span>{c.provider?.displayName ?? 'AI'} · {c.model.split('/').pop()}</span>
+              {c.updatedAt && <span>{formatRelativeTime(c.updatedAt)}</span>}
             </div>
           </div>
           <span
             className={cx(
-              'text-[10px]',
+              'text-[10px] shrink-0',
               c.state === 'running' && 'text-ok',
-              c.state === 'waiting_input' && 'text-warn',
-              c.state === 'waiting_approval' && 'text-warn',
+              (c.state === 'waiting_input' || c.state === 'waiting_approval') && 'text-warn',
               c.state === 'errored' && 'text-bad',
             )}
           >
             {c.state === 'running' ? '🟢' : c.state === 'waiting_input' || c.state === 'waiting_approval' ? '⏸' : ''}
           </span>
           <button
-            className="text-faint hover:text-bad"
+            className="text-faint hover:text-bad p-1 rounded hover:bg-bad/10 shrink-0 transition-colors"
+            title="Delete conversation"
             onClick={async (e) => {
               e.stopPropagation();
               if (!window.confirm(`Delete conversation "${c.name}"?`)) return;
@@ -221,7 +297,7 @@ function ConversationList({
               }
             }}
           >
-            <Trash2 size={12} />
+            <Trash2 size={13} />
           </button>
         </div>
       ))}
@@ -241,10 +317,11 @@ function NewConversation({ onCreated, onCancel }: { onCreated: (id: string) => v
   const [providerId, setProviderId] = useState('');
   const [model, setModel] = useState('');
   const [name, setName] = useState('');
+  const [autonomyLevel, setAutonomyLevel] = useState<'full' | 'moderate' | 'none'>('moderate');
   const [busy, setBusy] = useState(false);
   const effectiveProvider = providerId || providers[0]?.id || '';
 
-  const { data: modelData, isLoading: modelsLoading } = useSWR<{ models: { id: string; displayName: string }[] }>(
+  const { data: modelData, isLoading: modelsLoading, error: modelsError } = useSWR<{ models: { id: string; displayName: string }[] }>(
     effectiveProvider ? `/ai/providers/${effectiveProvider}/models` : null,
     fetcher,
     { shouldRetryOnError: false },
@@ -253,40 +330,102 @@ function NewConversation({ onCreated, onCancel }: { onCreated: (id: string) => v
   const effectiveModel = model || models[0]?.id || '';
 
   return (
-    <div className="p-4 space-y-3 border-b border-edge">
-      <h3 className="text-sm font-semibold">New conversation</h3>
+    <div className="p-4 space-y-3 border-b border-edge bg-raised/20">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold flex items-center gap-1.5 text-ink">
+          <Sparkles size={14} className="text-accent" /> Start New Conversation
+        </h3>
+        <button onClick={onCancel} className="text-faint hover:text-dim"><X size={14} /></button>
+      </div>
       {providers.length === 0 ? (
         <p className="text-xs text-warn">
           No AI providers configured. Add one in Settings → AI Providers.
         </p>
       ) : (
         <>
-          <Input placeholder="Name (e.g. Minecraft Mod)" value={name} onChange={(e) => setName(e.target.value)} />
-          <Select value={effectiveProvider} onChange={(e) => { setProviderId(e.target.value); setModel(''); }}>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>{p.displayName}</option>
-            ))}
-          </Select>
-          <Select value={effectiveModel} onChange={(e) => setModel(e.target.value)} disabled={modelsLoading}>
-            {modelsLoading && <option>Loading models…</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{m.displayName}</option>
-            ))}
-          </Select>
+          <div className="space-y-1">
+            <label className="text-[11px] text-faint">AI Provider</label>
+            <Select value={effectiveProvider} onChange={(e) => { setProviderId(e.target.value); setModel(''); }}>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{p.displayName}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] text-faint">Model</label>
+            <Select value={effectiveModel} onChange={(e) => setModel(e.target.value)} disabled={modelsLoading}>
+              {modelsLoading && <option>Loading models…</option>}
+              {!modelsLoading && models.length === 0 && <option value="">No models available</option>}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.displayName}</option>
+              ))}
+            </Select>
+            {modelsError && (
+              <p className="text-[11px] text-bad mt-1">Failed to fetch models: Check API key in Settings.</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] text-faint">Access Level</label>
+            <div className="grid grid-cols-3 gap-1 pt-0.5">
+              <button
+                type="button"
+                onClick={() => setAutonomyLevel('full')}
+                className={cx(
+                  'p-1.5 rounded-lg border text-center text-xs flex flex-col items-center gap-0.5 transition-all',
+                  autonomyLevel === 'full' ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300 font-semibold' : 'border-edge hover:bg-hover text-dim',
+                )}
+              >
+                <Zap size={13} className="text-emerald-400" />
+                <span className="text-[10px]">Full</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutonomyLevel('moderate')}
+                className={cx(
+                  'p-1.5 rounded-lg border text-center text-xs flex flex-col items-center gap-0.5 transition-all',
+                  autonomyLevel === 'moderate' ? 'bg-amber-500/15 border-amber-500 text-amber-300 font-semibold' : 'border-edge hover:bg-hover text-dim',
+                )}
+              >
+                <Shield size={13} className="text-amber-400" />
+                <span className="text-[10px]">Moderate</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutonomyLevel('none')}
+                className={cx(
+                  'p-1.5 rounded-lg border text-center text-xs flex flex-col items-center gap-0.5 transition-all',
+                  autonomyLevel === 'none' ? 'bg-sky-500/15 border-sky-500 text-sky-300 font-semibold' : 'border-edge hover:bg-hover text-dim',
+                )}
+              >
+                <Lock size={13} className="text-sky-400" />
+                <span className="text-[10px]">No access</span>
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] text-faint">Conversation Name <span className="text-faint/60">(optional)</span></label>
+            <Input
+              placeholder="Auto-generated from your first message"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
         </>
       )}
-      <div className="flex gap-2">
-        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+      <div className="flex justify-end gap-2 pt-1">
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
         <Button
           variant="primary"
+          size="sm"
           disabled={busy || !effectiveProvider || !effectiveModel}
           onClick={async () => {
             setBusy(true);
             try {
               const res = await api<{ conversation: { id: string } }>('POST', '/ai/conversations', {
-                name: name || 'New chat',
+                name: name.trim() || 'New Chat',
                 providerId: effectiveProvider,
                 model: effectiveModel,
+                autonomyLevel,
               });
               onCreated(res.conversation.id);
             } catch (err) {
@@ -296,7 +435,7 @@ function NewConversation({ onCreated, onCancel }: { onCreated: (id: string) => v
             }
           }}
         >
-          Create
+          Start Conversation
         </Button>
       </div>
     </div>
@@ -315,8 +454,20 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
   );
   const messages = useMemo(() => data?.messages ?? [], [data]);
   const state = data?.conversation.state ?? conversation.state;
+  const [autonomy, setAutonomy] = useState<'full' | 'moderate' | 'none'>(
+    conversation.autonomyLevel ?? 'moderate',
+  );
+
+  useEffect(() => {
+    if (data?.conversation?.autonomyLevel) {
+      setAutonomy(data.conversation.autonomyLevel);
+    }
+  }, [data?.conversation?.autonomyLevel]);
+
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<{ name: string; size: number; content: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const typewriter = useTypewriter();
   const streamText = typewriter.displayed;
@@ -329,22 +480,20 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
     if (evt.event === 'stream.text') {
       typewriter.push((evt.data as { delta: string }).delta);
     } else if (['message.assistant', 'run.done', 'run.error'].includes(evt.event)) {
-      // Let the type-out catch up, then clear the preview and swap in the
-      // persisted message so text never pops in early or is cut off.
       typewriter.finish(() => {
         typewriter.reset();
         refetch();
       });
     } else if (
-      ['ui.ask', 'plan.proposed', 'tool.awaiting_approval', 'tool.finished', 'state'].includes(evt.event)
+      ['ui.ask', 'plan.proposed', 'tool.awaiting_approval', 'tool.finished', 'state', 'conversation.updated'].includes(evt.event)
     ) {
       refetch();
     }
   });
 
-  // Reset the type-out when switching conversations.
   useEffect(() => {
     typewriter.reset();
+    setAttachments([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convId]);
 
@@ -352,17 +501,70 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, streamText]);
 
+  async function updateAutonomy(level: 'full' | 'moderate' | 'none') {
+    setAutonomy(level);
+    try {
+      await api('PATCH', `/ai/conversations/${convId}`, { autonomyLevel: level });
+      refetch();
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Failed to update access mode');
+    }
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    for (const file of files) {
+      if (file.size > 2 * 1024 * 1024) {
+        toast('error', `File ${file.name} is too large (> 2MB).`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        let text = (ev.target?.result as string) || '';
+        if (text.length > 100000) {
+          const lines = text.split('\n');
+          if (lines.length > 400) {
+            text = `[... truncated, showing last 400 lines ...]\n` + lines.slice(-400).join('\n');
+          }
+        }
+        setAttachments((prev) => [...prev, { name: file.name, size: file.size, content: text }]);
+      };
+      reader.onerror = () => {
+        toast('error', `Could not read ${file.name}`);
+      };
+      reader.readAsText(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function send() {
-    const content = input.trim();
-    if (!content) return;
+    let content = input.trim();
+    if (!content && attachments.length === 0) return;
+
+    if (attachments.length > 0) {
+      const fileBlocks = attachments
+        .map((att) => {
+          const ext = att.name.split('.').pop() || 'text';
+          return `[Attached file: ${att.name} (${formatSize(att.size)})]\n\`\`\`${ext}\n${att.content}\n\`\`\``;
+        })
+        .join('\n\n');
+      content = content ? `${fileBlocks}\n\n${content}` : fileBlocks;
+    }
+
     setInput('');
+    setAttachments([]);
     setBusy(true);
     try {
       await api('POST', `/ai/conversations/${convId}/messages`, { content });
       refetch();
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Send failed');
-      setInput(content);
+      setInput(input);
     } finally {
       setBusy(false);
     }
@@ -424,10 +626,52 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-edge p-3 shrink-0">
-        <div className="flex gap-2">
+      <div className="border-t border-edge p-3 shrink-0 space-y-2.5 bg-panel/30">
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pb-0.5 max-h-24 overflow-y-auto">
+            {attachments.map((att, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1.5 bg-raised border border-edge rounded-md px-2 py-1 text-xs text-ink"
+              >
+                <FileText size={12} className="text-accent" />
+                <span className="truncate max-w-[120px]" title={att.name}>{att.name}</span>
+                <span className="text-[10px] text-faint">({formatSize(att.size)})</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  className="text-faint hover:text-bad ml-0.5"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Input bar */}
+        <div className="flex items-center gap-1.5">
+          <input
+            type="file"
+            ref={fileInputRef}
+            multiple
+            className="hidden"
+            onChange={handleFileSelect}
+            accept=".txt,.log,.yml,.yaml,.json,.properties,.toml,.conf,.cfg,.sh,.bat,.md,.env,.xml,.sql"
+          />
+          <button
+            type="button"
+            title="Attach file for AI to read (.log, .properties, .yml...)"
+            disabled={busy || running}
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 text-dim hover:text-accent rounded-lg hover:bg-raised transition-colors shrink-0 disabled:opacity-50"
+          >
+            <Paperclip size={16} />
+          </button>
           <Input
-            placeholder={running ? 'Agent is running…' : 'Message the AI…'}
+            className="flex-1"
+            placeholder={running ? 'Agent is working…' : 'Message the AI or attach logs/configs…'}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -450,10 +694,61 @@ function Chat({ conversation, onStateChange }: { conversation: Conversation; onS
               <Square size={14} />
             </Button>
           ) : (
-            <Button variant="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
+            <Button variant="primary" onClick={() => void send()} disabled={busy || (!input.trim() && attachments.length === 0)}>
               <Send size={14} />
             </Button>
           )}
+        </div>
+
+        {/* Autonomy Level Switcher */}
+        <div className="flex items-center justify-between pt-1 border-t border-edge/40 text-[11px]">
+          <span className="text-faint flex items-center gap-1">
+            Access mode:
+          </span>
+          <div className="inline-flex rounded-lg bg-raised p-0.5 border border-edge text-[11px]">
+            <button
+              type="button"
+              onClick={() => updateAutonomy('full')}
+              title="Full access: AI executes tasks without asking for approval"
+              className={cx(
+                'px-2 py-0.5 rounded flex items-center gap-1 transition-all',
+                autonomy === 'full'
+                  ? 'bg-emerald-500/20 text-emerald-300 font-semibold shadow-sm border border-emerald-500/30'
+                  : 'text-dim hover:text-ink',
+              )}
+            >
+              <Zap size={11} className={autonomy === 'full' ? 'text-emerald-400' : ''} />
+              <span>Full access</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateAutonomy('moderate')}
+              title="Moderate access: AI asks approval for dangerous actions only (commands, deletes)"
+              className={cx(
+                'px-2 py-0.5 rounded flex items-center gap-1 transition-all',
+                autonomy === 'moderate'
+                  ? 'bg-amber-500/20 text-amber-300 font-semibold shadow-sm border border-amber-500/30'
+                  : 'text-dim hover:text-ink',
+              )}
+            >
+              <Shield size={11} className={autonomy === 'moderate' ? 'text-amber-400' : ''} />
+              <span>Moderate</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => updateAutonomy('none')}
+              title="No access: AI requires approval before executing ANY task"
+              className={cx(
+                'px-2 py-0.5 rounded flex items-center gap-1 transition-all',
+                autonomy === 'none'
+                  ? 'bg-sky-500/20 text-sky-300 font-semibold shadow-sm border border-sky-500/30'
+                  : 'text-dim hover:text-ink',
+              )}
+            >
+              <Lock size={11} className={autonomy === 'none' ? 'text-sky-400' : ''} />
+              <span>No access</span>
+            </button>
+          </div>
         </div>
       </div>
     </>
@@ -643,17 +938,26 @@ function UIComponentView({
     <div className="border border-accent/30 bg-accent/5 rounded-lg p-3 space-y-2.5">
       <p className="text-[13px]">{component.prompt}</p>
       {answered ? (
-        <p className="text-xs text-ok flex items-center gap-1.5">
-          <Check size={12} /> {formatResponse(response)}
-        </p>
+        <div className="text-xs text-emerald-400 bg-emerald-950/30 border border-emerald-500/30 rounded-md px-2.5 py-1.5 flex items-center gap-2">
+          <Check size={14} className="text-emerald-400 shrink-0" />
+          <span className="text-faint">Answered:</span>
+          <span className="font-semibold text-emerald-300">{formatResponse(response)}</span>
+        </div>
       ) : (
         <>
           {component.kind === 'buttons' && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-2 pt-1">
               {component.options?.map((o) => (
-                <Button key={o.value} size="sm" disabled={busy} onClick={() => void submit(o.value)}>
-                  {o.label}
-                </Button>
+                <button
+                  key={o.value}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void submit(o.value)}
+                  className="px-3 py-1.5 rounded-lg bg-raised hover:bg-accent hover:text-white border border-edge hover:border-accent text-xs font-medium text-ink transition-all shadow-sm active:scale-95 disabled:opacity-50 text-left flex items-center gap-1.5"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+                  <span>{o.label}</span>
+                </button>
               ))}
             </div>
           )}

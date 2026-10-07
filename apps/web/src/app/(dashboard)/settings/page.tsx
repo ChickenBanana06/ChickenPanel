@@ -93,11 +93,12 @@ interface ProviderRow {
   id: string; kind: string; displayName: string; baseUrl: string | null; enabled: boolean; apiKeyMasked: string | null;
 }
 
-const KIND_PRESETS: Record<string, { label: string; needsBaseUrl: boolean; hint?: string }> = {
-  anthropic: { label: 'Anthropic (Claude)', needsBaseUrl: false },
-  openai: { label: 'OpenAI (GPT)', needsBaseUrl: false },
-  google: { label: 'Google (Gemini)', needsBaseUrl: false },
-  'openai-compatible': { label: 'OpenAI-compatible (Ollama, vLLM, OpenRouter…)', needsBaseUrl: true, hint: 'e.g. http://localhost:11434/v1' },
+const KIND_PRESETS: Record<string, { label: string; defaultName: string; needsBaseUrl: boolean; defaultBaseUrl?: string; hint?: string }> = {
+  openrouter: { label: 'OpenRouter (Recommended - 400+ models)', defaultName: 'OpenRouter', needsBaseUrl: false, defaultBaseUrl: 'https://openrouter.ai/api/v1' },
+  anthropic: { label: 'Anthropic (Claude)', defaultName: 'Claude', needsBaseUrl: false },
+  openai: { label: 'OpenAI (GPT)', defaultName: 'OpenAI', needsBaseUrl: false },
+  google: { label: 'Google (Gemini)', defaultName: 'Gemini', needsBaseUrl: false },
+  'openai-compatible': { label: 'Custom OpenAI-compatible (Ollama, vLLM…)', defaultName: 'Local LLM', needsBaseUrl: true, hint: 'e.g. http://localhost:11434/v1' },
 };
 
 function AIProviders({ canConfigure }: { canConfigure: boolean }) {
@@ -173,10 +174,10 @@ function ProviderModal({
   const toast = useToast();
   const isNew = editing === 'new';
   const existing = editing !== null && editing !== 'new' ? editing : null;
-  const [kind, setKind] = useState(existing?.kind ?? 'anthropic');
-  const [displayName, setDisplayName] = useState(existing?.displayName ?? '');
+  const [kind, setKind] = useState(existing?.kind ?? 'openrouter');
+  const [displayName, setDisplayName] = useState(existing?.displayName ?? 'OpenRouter');
   const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? '');
+  const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? (existing?.kind === 'openrouter' ? 'https://openrouter.ai/api/v1' : ''));
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [busy, setBusy] = useState(false);
 
@@ -185,10 +186,10 @@ function ProviderModal({
   const [lastKey, setLastKey] = useState(key);
   if (key !== lastKey) {
     setLastKey(key);
-    setKind(existing?.kind ?? 'anthropic');
-    setDisplayName(existing?.displayName ?? '');
+    setKind(existing?.kind ?? 'openrouter');
+    setDisplayName(existing?.displayName ?? (existing?.kind ? KIND_PRESETS[existing.kind]?.defaultName ?? '' : 'OpenRouter'));
     setApiKey('');
-    setBaseUrl(existing?.baseUrl ?? '');
+    setBaseUrl(existing?.baseUrl ?? (existing?.kind === 'openrouter' || !existing?.kind ? 'https://openrouter.ai/api/v1' : ''));
     setEnabled(existing?.enabled ?? true);
   }
 
@@ -198,21 +199,52 @@ function ProviderModal({
     <Modal open={editing !== null} onClose={onClose} title={isNew ? 'Add AI provider' : 'Edit AI provider'}>
       <div className="space-y-3">
         <Field label="Type">
-          <Select value={kind} onChange={(e) => setKind(e.target.value)} disabled={!isNew}>
+          <Select
+            value={kind}
+            onChange={(e) => {
+              const nextKind = e.target.value;
+              setKind(nextKind);
+              const p = KIND_PRESETS[nextKind];
+              if (p) {
+                if (!displayName || displayName === KIND_PRESETS[kind]?.defaultName) {
+                  setDisplayName(p.defaultName);
+                }
+                if (p.defaultBaseUrl) {
+                  setBaseUrl(p.defaultBaseUrl);
+                } else if (!p.needsBaseUrl) {
+                  setBaseUrl('');
+                }
+              }
+            }}
+            disabled={!isNew}
+          >
             {Object.entries(KIND_PRESETS).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
           </Select>
         </Field>
         <Field label="Display name">
-          <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Claude" />
+          <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="OpenRouter" />
         </Field>
         <Field label={isNew ? 'API key' : 'API key (leave blank to keep current)'}>
-          <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…" />
+          <Input
+            type="password"
+            value={apiKey}
+            onChange={(e) => {
+              const val = e.target.value;
+              setApiKey(val);
+              if (isNew && val.startsWith('sk-or-v1-') && kind !== 'openrouter') {
+                setKind('openrouter');
+                setDisplayName('OpenRouter');
+                setBaseUrl('https://openrouter.ai/api/v1');
+              }
+            }}
+            placeholder="sk-or-v1-…"
+          />
         </Field>
-        {(preset?.needsBaseUrl || baseUrl) && (
+        {(preset?.needsBaseUrl || (kind === 'openrouter' && baseUrl) || (kind === 'openai-compatible')) && (
           <Field label="Base URL">
-            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={preset?.hint} />
+            <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={preset?.hint ?? 'https://openrouter.ai/api/v1'} />
           </Field>
         )}
         <label className="flex items-center gap-2 text-sm">
@@ -226,10 +258,11 @@ function ProviderModal({
             onClick={async () => {
               setBusy(true);
               try {
+                const finalBaseUrl = kind === 'openrouter' && !baseUrl ? 'https://openrouter.ai/api/v1' : baseUrl || null;
                 const body = {
                   kind, displayName, enabled,
                   ...(apiKey ? { apiKey } : {}),
-                  ...(baseUrl ? { baseUrl } : { baseUrl: null }),
+                  baseUrl: finalBaseUrl,
                 };
                 if (isNew) await api('POST', '/ai/providers', body);
                 else await api('PATCH', `/ai/providers/${existing!.id}`, body);

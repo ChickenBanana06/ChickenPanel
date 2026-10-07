@@ -76,10 +76,18 @@ export class AIService {
     baseUrl?: string | null;
     enabled: boolean;
   }): Promise<{ id: string }> {
+    let kind = input.kind;
+    let baseUrl = input.baseUrl ?? null;
+    if (input.apiKey?.startsWith('sk-or-v1-')) {
+      kind = 'openrouter';
+      if (!baseUrl) baseUrl = 'https://openrouter.ai/api/v1';
+    } else if (kind === 'openrouter' && !baseUrl) {
+      baseUrl = 'https://openrouter.ai/api/v1';
+    }
     const data = {
-      kind: input.kind,
+      kind,
       displayName: input.displayName,
-      baseUrl: input.baseUrl ?? null,
+      baseUrl,
       enabled: input.enabled,
       ...(input.apiKey ? { apiKeyEnc: encryptSecret(input.apiKey, this.ctx.config.secret) } : {}),
     };
@@ -156,11 +164,18 @@ export class AIService {
 
   /* ---------------- Conversations ---------------- */
 
-  async createConversation(userId: string, input: { name: string; providerId: string; model: string }) {
+  async createConversation(userId: string, input: { name?: string; providerId: string; model: string; autonomyLevel?: string }) {
     const provider = await this.ctx.db.aIProvider.findUnique({ where: { id: input.providerId } });
     if (!provider || !provider.enabled) throw ApiError.badRequest('Provider not found or disabled');
     return this.ctx.db.aIConversation.create({
-      data: { name: input.name, userId, providerId: input.providerId, model: input.model, state: 'idle' },
+      data: {
+        name: input.name?.trim() || 'New Chat',
+        userId,
+        providerId: input.providerId,
+        model: input.model,
+        state: 'idle',
+        autonomyLevel: input.autonomyLevel || 'moderate',
+      },
     });
   }
 
@@ -200,9 +215,32 @@ export class AIService {
     await this.ctx.db.aIMessage.create({
       data: { conversationId, role: 'user', parts: [{ type: 'text', text: content }] as Prisma.InputJsonValue },
     });
+    // If the conversation is named "New Chat", auto-generate a smart title from the prompt
+    if (conv.name === 'New Chat' || conv.name === 'New chat') {
+      const generatedName = this.generateConversationTitle(content);
+      if (generatedName && generatedName !== conv.name) {
+        await this.ctx.db.aIConversation.update({
+          where: { id: conversationId },
+          data: { name: generatedName },
+        });
+        this.publish(conversationId, 'conversation.updated', { id: conversationId, name: generatedName });
+      }
+    }
     await this.touch(conversationId);
     this.publish(conversationId, 'message.user', { content });
     this.startRun(conversationId);
+  }
+
+  private generateConversationTitle(prompt: string): string {
+    // Strip attached file blocks: [Attached file: foo.txt (1 KB)] ```...```
+    let cleaned = prompt.replace(/\[Attached file:[^\]]+\]\s*```[\s\S]*?```/g, '').trim();
+    if (!cleaned) cleaned = prompt.replace(/\r?\n/g, ' ').trim();
+    cleaned = cleaned.replace(/^[\W_]+/, '').replace(/\s+/g, ' ');
+    if (!cleaned) return 'New Chat';
+    if (cleaned.length > 40) {
+      cleaned = cleaned.slice(0, 37).trim() + '...';
+    }
+    return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
   }
 
   cancelRun(conversationId: string): void {
@@ -324,7 +362,7 @@ export class AIService {
     const client = this.clientFor(conv.provider);
 
     // Resume: execute any tool calls persisted but not yet answered.
-    const resumed = await this.executePendingToolCalls(conv.id, conv.userId, conv.user.role, permissions, run);
+    const resumed = await this.executePendingToolCalls(conv.id, conv.userId, conv.user.role, permissions, conv.autonomyLevel || 'moderate', run);
     if (resumed === 'paused') return;
 
     await this.setState(conversationId, 'running');
@@ -427,7 +465,14 @@ export class AIService {
           },
         });
       }
-      const outcome = await this.executePendingToolCalls(conversationId, conv.userId, conv.user.role, permissions, run);
+      const outcome = await this.executePendingToolCalls(
+        conversationId,
+        conv.userId,
+        conv.user.role,
+        permissions,
+        conv.autonomyLevel || 'moderate',
+        run,
+      );
       if (outcome === 'paused') return;
     }
 
@@ -447,6 +492,7 @@ export class AIService {
     userId: string,
     role: string,
     permissions: Set<Permission>,
+    autonomyLevel: string,
     run: ActiveRun,
   ): Promise<'continue' | 'paused'> {
     const pending = await this.findPendingToolCalls(conversationId);
@@ -485,7 +531,12 @@ export class AIService {
         });
         continue;
       }
-      if (tool.dangerous && rowStatus !== 'approved') {
+
+      const needsApproval =
+        rowStatus !== 'approved' &&
+        (autonomyLevel === 'none' || (autonomyLevel === 'moderate' && tool.dangerous));
+
+      if (needsApproval) {
         await this.ctx.db.aIToolCall.updateMany({
           where: { conversationId, toolCallId: tc.toolCallId },
           data: { status: 'awaiting_approval' },
@@ -744,7 +795,7 @@ export class AIService {
       '- Never claim an action succeeded unless a tool result confirms it.',
       '- Show errors honestly and attempt to fix them (read logs, inspect files, retry builds).',
       '- For complex multi-step work, call propose_plan first and wait for approval.',
-      '- Use ask_user for choices that materially change the outcome (versions, RAM, software). Users can always answer in free text instead.',
+      '- INTERACTIVE QUESTIONS & MULTIPLE CHOICE: When you need choices, preferences, or decisions from the user (such as picking a server software type, Minecraft version, RAM allocation, port, or confirmation), ALWAYS call the `ask_user` tool with `kind: "buttons"` and an array of selectable `options: [{ label: "...", value: "..." }]`. This renders interactive clickable buttons directly in the chat UI for the user to answer with one click. Do NOT print lists of options as text bullet points when asking the user to choose.',
       '- Long operations return task ids; poll get_task for progress instead of assuming completion.',
       '- Dangerous operations (deletes, restores, shell commands) require explicit user approval; request them only when needed.',
       '- When creating applications, first check nodes (list_nodes) and catalogs (get_type_catalog). Never assume a port is free — the platform allocates ports.',

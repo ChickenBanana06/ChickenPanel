@@ -53,7 +53,7 @@ export const UpdateApplicationSchema = z.object({
 /* AI --------------------------------------------------------------- */
 
 export const UpsertAIProviderSchema = z.object({
-  kind: z.enum(['anthropic', 'openai', 'google', 'openai-compatible']),
+  kind: z.enum(['anthropic', 'openai', 'google', 'openrouter', 'openai-compatible']),
   displayName: z.string().min(1).max(64),
   apiKey: z.string().min(1).max(4096).optional(),
   baseUrl: z.string().url().optional().nullable(),
@@ -61,9 +61,15 @@ export const UpsertAIProviderSchema = z.object({
 });
 
 export const CreateConversationSchema = z.object({
-  name: z.string().min(1).max(100).default('New chat'),
+  name: z.string().max(100).optional().default('New chat'),
   providerId: z.string(),
   model: z.string().min(1).max(200),
+  autonomyLevel: z.enum(['full', 'moderate', 'none']).optional().default('moderate'),
+});
+
+export const UpdateConversationSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  autonomyLevel: z.enum(['full', 'moderate', 'none']).optional(),
 });
 
 export const SendMessageSchema = z.object({

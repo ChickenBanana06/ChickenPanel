@@ -96,20 +96,22 @@ export class OpenAIProvider implements AIProviderClient {
     public readonly kind: string,
     private readonly apiKey: string,
     private readonly baseUrl = 'https://api.openai.com/v1',
+    private readonly extraHeaders: Record<string, string> = {},
   ) {}
 
   private headers(): Record<string, string> {
     return {
       'content-type': 'application/json',
       authorization: `Bearer ${this.apiKey}`,
+      ...this.extraHeaders,
     };
   }
 
   async listModels(): Promise<ModelInfo[]> {
     const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/models`, { headers: this.headers() });
     if (!res.ok) throw new ProviderError(`listModels failed: ${await readErrorBody(res)}`, res.status);
-    const body = (await res.json()) as { data?: { id: string }[] };
-    return (body.data ?? []).map((m) => ({ id: m.id, displayName: m.id }));
+    const body = (await res.json()) as { data?: { id: string; name?: string }[] };
+    return (body.data ?? []).map((m) => ({ id: m.id, displayName: m.name || m.id }));
   }
 
   async *streamChat(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<ProviderStreamEvent> {

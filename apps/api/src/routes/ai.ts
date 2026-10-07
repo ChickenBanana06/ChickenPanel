@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { UpsertAIProviderSchema, CreateConversationSchema, SendMessageSchema } from '@nexpanel/shared';
+import { UpsertAIProviderSchema, CreateConversationSchema, UpdateConversationSchema, SendMessageSchema } from '@nexpanel/shared';
 import type { AppContext } from '../context.js';
 import { makeAuthHooks } from '../plugins/auth.js';
 import { writeAudit } from '../lib/audit.js';
@@ -89,12 +89,16 @@ export async function aiRoutes(app: FastifyInstance, ctx: AppContext): Promise<v
 
   app.patch('/conversations/:id', { preHandler: requirePermission('ai.use') }, async (req) => {
     const { id } = req.params as { id: string };
-    const { name } = req.body as { name?: string };
+    const body = UpdateConversationSchema.parse(req.body);
     await ctx.ai.getConversation(req.authedUser!.id, id);
-    if (name && name.length <= 100) {
-      await ctx.db.aIConversation.update({ where: { id }, data: { name } });
-    }
-    return { ok: true };
+    const updated = await ctx.db.aIConversation.update({
+      where: { id },
+      data: {
+        ...(body.name ? { name: body.name } : {}),
+        ...(body.autonomyLevel ? { autonomyLevel: body.autonomyLevel } : {}),
+      },
+    });
+    return { conversation: updated };
   });
 
   app.post('/conversations/:id/messages', { preHandler: requirePermission('ai.use') }, async (req) => {
